@@ -1,0 +1,428 @@
+/* KPMG Corporate Theme - Professional Audit Assistant Styling */
+
+/* Root Variables - KPMG Brand Colors */
+:root {
+    --kpmg-blue: #00338D;
+    --kpmg-dark-blue: #003366;
+    --kpmg-red: #E31837;
+    --kpmg-light-blue: #E6F3FF;
+    --kpmg-gray: #6C757D;
+    --kpmg-light-gray: #F8F9FA;
+    --success-green: #28A745;
+    --warning-yellow: #FFC107;
+    --danger-red: #DC3545;
+    --info-blue: #17A2B8;
+}
+
+/* Global Styling */
+.main .block-container {
+    padding-top: 1rem;
+    padding-bottom: 2rem;
+    max-width: 1200px;
+}
+
+/* KPMG Header */
+.kpmg-header {
+    display: flex;
+    align-items: center;
+    background: linear-gradient(135deg, var(--kpmg-blue) 0%, var(--kpmg-dark-blue) 100%);
+    padding: 1.5rem 2rem;
+    margin: -1rem -1rem 2rem -1rem;
+    border-radius: 0 0 15px 15px;
+    box-shadow: 0 4px 15px rgba(0, 51, 141, 0.2);
+}
+
+.kpmg-logo {
+    margin-right: 2rem;
+    flex-shrink: 0;
+}
+
+.header-content {
+    flex: 1;
+    color: white;
+}
+
+.main-title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin: 0;
+    color: white;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.subtitle {
+    font-size: 1.1rem;
+    margin: 0.5rem 0 0 0;
+    opacity: 0.9;
+    font-weight: 300;
+}
+
+/* Progress Indicator */
+.progress-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 2rem 0;
+    padding: 1.5rem;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.progress-step {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    min-width: 120px;
+}
+
+.step-number {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    background: var(--kpmg-light-gray);
+    color: var(--kpmg-gray);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 1.1rem;
+    margin-bottom: 0.5rem;
+    transition: all 0.3s ease;
+}
+
+.progress-step.active .step-number {
+    background: var(--kpmg-blue);
+    color: white;
+    box-shadow: 0 2px 8px rgba(0, 51, 141, 0.3);
+}
+
+.progress-step span {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--kpmg-gray);
+}
+
+.progress-step.active span {
+    color: var(--kpmg-blue);
+    font-weight: 600;
+}
+
+.progress-line {
+    width: 60px;
+    height: 3px;
+    background: var(--kpmg-light-gray);
+    margin: 0 1rem;
+    border-radius: 2px;
+}
+
+.progress-line.completed {
+    background: var(--kpmg-blue);
+}
+
+/* Section Cards */
+.section-card {
+    background: white;
+    border-radius: 15px;
+    padding: 2rem;
+    margin: 1.5rem 0;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    border: 1px solid #E9ECEF;
+    transition: all 0.3s ease;
+}
+
+.section-card:hover {
+    box-shadow: 0 8px 30px rgba(0, 51, 141, 0.12);
+    transform: translateY(-2px);
+}
+
+.section-card.disabled {
+    opacity: 0.6;
+    background: #F8F9FA;
+}
+
+.section-card h2 {
+    color: var(--kpmg-blue);
+    font-weight: 600;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 2px solid var(--kpmg-light-blue);
+}
+
+/* Status Indicators */
+.status-indicator {
+    display: flex;
+    align-items: center;
+    padding: 1rem 1.5rem;
+    border-radius: 10px;
+    margin: 1rem 0;
+    font-weight: 500;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.status-icon {
+    margin-right: 0.75rem;
+    font-size: 1.2rem;
+}
+
+.status-success {
+    background: linear-gradient(135deg, #D4EDDA 0%, #C3E6CB 100%);
+    color: #155724;
+    border-left: 4px solid var(--success-green);
+}
+
+.status-warning {
+    background: linear-gradient(135deg, #FFF3CD 0%, #FFEAA7 100%);
+    color: #856404;
+    border-left: 4px solid var(--warning-yellow);
+}
+
+.status-error {
+    background: linear-gradient(135deg, #F8D7DA 0%, #F5C6CB 100%);
+    color: #721C24;
+    border-left: 4px solid var(--danger-red);
+}
+
+.status-info {
+    background: linear-gradient(135deg, var(--kpmg-light-blue) 0%, #CCE7FF 100%);
+    color: var(--kpmg-dark-blue);
+    border-left: 4px solid var(--kpmg-blue);
+}
+
+/* Button Styling */
+.stButton > button {
+    background: linear-gradient(135deg, var(--kpmg-blue) 0%, var(--kpmg-dark-blue) 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 51, 141, 0.2);
+}
+
+.stButton > button:hover {
+    background: linear-gradient(135deg, var(--kpmg-dark-blue) 0%, var(--kpmg-blue) 100%);
+    box-shadow: 0 4px 15px rgba(0, 51, 141, 0.3);
+    transform: translateY(-1px);
+}
+
+.stButton > button:disabled {
+    background: var(--kpmg-gray);
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+}
+
+/* File Uploader Styling */
+.stFileUploader > div {
+    border: 2px dashed var(--kpmg-blue);
+    border-radius: 10px;
+    padding: 2rem;
+    background: var(--kpmg-light-blue);
+    transition: all 0.3s ease;
+}
+
+.stFileUploader > div:hover {
+    border-color: var(--kpmg-dark-blue);
+    background: #CCE7FF;
+}
+
+/* Download Button */
+.stDownloadButton > button {
+    background: linear-gradient(135deg, var(--success-green) 0%, #218838 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 0.75rem 1.5rem;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(40, 167, 69, 0.2);
+}
+
+.stDownloadButton > button:hover {
+    background: linear-gradient(135deg, #218838 0%, var(--success-green) 100%);
+    box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+}
+
+/* Chat Interface */
+.stChatMessage {
+    background: white;
+    border-radius: 12px;
+    padding: 1rem;
+    margin: 0.5rem 0;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    border: 1px solid #E9ECEF;
+}
+
+.stChatMessage[data-testid="user-message"] {
+    background: linear-gradient(135deg, var(--kpmg-light-blue) 0%, #E6F3FF 100%);
+    border-left: 4px solid var(--kpmg-blue);
+}
+
+.stChatMessage[data-testid="assistant-message"] {
+    background: linear-gradient(135deg, #F8F9FA 0%, #E9ECEF 100%);
+    border-left: 4px solid var(--kpmg-gray);
+}
+
+/* Input Fields */
+.stTextInput > div > div > input,
+.stTextArea > div > div > textarea {
+    border: 2px solid #E9ECEF;
+    border-radius: 8px;
+    padding: 0.75rem;
+    transition: all 0.3s ease;
+}
+
+.stTextInput > div > div > input:focus,
+.stTextArea > div > div > textarea:focus {
+    border-color: var(--kpmg-blue);
+    box-shadow: 0 0 0 3px rgba(0, 51, 141, 0.1);
+}
+
+/* Metrics and KPI Cards */
+.metric-card {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+    border: 1px solid #E9ECEF;
+}
+
+.metric-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--kpmg-blue);
+    margin-bottom: 0.5rem;
+}
+
+.metric-label {
+    font-size: 0.9rem;
+    color: var(--kpmg-gray);
+    font-weight: 500;
+}
+
+/* Footer */
+.footer {
+    background: var(--kpmg-dark-blue);
+    color: white;
+    padding: 2rem;
+    margin: 3rem -1rem -2rem -1rem;
+    text-align: center;
+    border-radius: 15px 15px 0 0;
+}
+
+.footer-content p {
+    margin: 0.25rem 0;
+    opacity: 0.9;
+}
+
+/* Sidebar (if used) */
+.css-1d391kg {
+    background: var(--kpmg-light-blue);
+}
+
+/* Expander Styling */
+.streamlit-expanderHeader {
+    background: var(--kpmg-light-blue);
+    border-radius: 8px;
+    color: var(--kpmg-blue);
+    font-weight: 600;
+}
+
+/* Spinner Customization */
+.stSpinner > div {
+    border-color: var(--kpmg-blue);
+}
+
+/* Alert/Info Boxes */
+.stAlert {
+    border-radius: 10px;
+    border: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.stSuccess {
+    background: linear-gradient(135deg, #D4EDDA 0%, #C3E6CB 100%);
+    color: #155724;
+}
+
+.stError {
+    background: linear-gradient(135deg, #F8D7DA 0%, #F5C6CB 100%);
+    color: #721C24;
+}
+
+.stWarning {
+    background: linear-gradient(135deg, #FFF3CD 0%, #FFEAA7 100%);
+    color: #856404;
+}
+
+.stInfo {
+    background: linear-gradient(135deg, var(--kpmg-light-blue) 0%, #CCE7FF 100%);
+    color: var(--kpmg-dark-blue);
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .kpmg-header {
+        flex-direction: column;
+        text-align: center;
+        padding: 1rem;
+    }
+    
+    .kpmg-logo {
+        margin: 0 0 1rem 0;
+    }
+    
+    .main-title {
+        font-size: 2rem;
+    }
+    
+    .progress-container {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .progress-line {
+        width: 3px;
+        height: 30px;
+        margin: 0;
+    }
+    
+    .section-card {
+        padding: 1rem;
+        margin: 1rem 0;
+    }
+}
+
+/* Animation for loading states */
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.5; }
+    100% { opacity: 1; }
+}
+
+.loading {
+    animation: pulse 2s infinite;
+}
+
+/* Professional Typography */
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Arial', 'Helvetica', sans-serif;
+    color: var(--kpmg-blue);
+}
+
+p, span, div {
+    font-family: 'Arial', 'Helvetica', sans-serif;
+    line-height: 1.6;
+}
+
+/* Code and Technical Content */
+code {
+    background: var(--kpmg-light-gray);
+    padding: 0.2rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.9rem;
+}
