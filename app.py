@@ -26,8 +26,11 @@ logger = logging.getLogger(__name__)
 # This is a Streamlit app for a Cyber Risk Audit Bot that allows users to upload policies and evidence files,
 # train a knowledge base, assess evidence against the knowledge base, and generate an audit workbook.
 
-
+# Path to save the trained model
 VECTORSTORE_PATH = "saved_kb_vectorstore"
+COMPANY_VECTORSTORE_PATH = "saved_company_vectorstore"
+
+
 MODELS_PATH = "models"  
 
 @st.cache_data(ttl=60)  # Cache for 60 seconds to avoid frequent API calls
@@ -107,11 +110,22 @@ if os.path.exists(VECTORSTORE_PATH) and not st.session_state.get('kb_ready', Fal
     st.session_state['kb_ready'] = True
     st.session_state['kb_loaded_from_saved'] = True
 
+# Check if a saved company vectorstore exists
+if os.path.exists(COMPANY_VECTORSTORE_PATH) and not st.session_state.get('company_files_ready', False):
+    st.session_state['company_kb_vectorstore'] = FAISS.load_local(
+        COMPANY_VECTORSTORE_PATH,
+        OllamaEmbeddings(model="llama2"),
+        allow_dangerous_deserialization=True
+    )
+    st.session_state['company_files_ready'] = True  
+    st.session_state['company_kb_loaded_from_saved'] = True
+    
+
 # --- Step 1: Upload Knowledge Base Documents ---
-with st.expander("1️⃣ Upload policy documents", expanded=True):
+with st.expander("1️⃣ Upload training documents", expanded=True):
     
     policy_files = st.file_uploader(
-        "Upload Information Security Policies, SOC 2 Reports, or CRI Profiles (PDF, TXT, CSV, XLSX)",
+        "Upload Information Security Policies (PDF, TXT, CSV, XLSX)",
         type=["pdf", "txt", "csv", "xlsx"], accept_multiple_files=True
     )
 
@@ -128,8 +142,16 @@ with st.expander("1️⃣ Upload policy documents", expanded=True):
         st.session_state['assessment'] = None
     if 'kb_vectorstore' not in st.session_state:
         st.session_state['kb_vectorstore'] = None
-    if 'ed_vectorstore' not in st.session_state:
-        st.session_state['ed_vectorstore'] = None
+    if 'evid_vectorstore' not in st.session_state:
+        st.session_state['evid_vectorstore'] = None
+    if 'company_kb_vectorstore' not in st.session_state:
+        st.session_state['company_kb_vectorstore'] = None
+    if 'merged_vectorstore' not in st.session_state:
+        st.session_state['merged_vectorstore'] = None
+    if 'evidence_kb_ready' not in st.session_state:
+        st.session_state['evidence_kb_ready'] = False
+    if 'company_files_ready' not in st.session_state:
+        st.session_state['company_files_ready'] = False
 
      # --- Dynamic Button States ---
     train_disabled = not (policy_files and len(policy_files) > 0)
@@ -220,29 +242,115 @@ with st.expander("1️⃣ Upload policy documents", expanded=True):
     else:
         st.warning("🚫 No trained model loaded. Please train or load a saved model.")
 
+# --- Step 2: Upload Company Resources ---
+with st.expander("2️⃣ Upload company resources", expanded=True):
+    st.markdown(
+        "Upload your company resources such as SOC 2 reports, CRI profiles, or other relevant documents. "
+        "These will be used to assess your evidence against the knowledge base."
+    )
+    
+    company_files = st.file_uploader(
+        "Upload Company Resources (PDF, TXT, CSV, XLSX)",
+        type=["pdf", "txt", "csv", "xlsx"], accept_multiple_files=True
+    )
+
+    # if company_files:        
+    #     st.session_state['company_files_ready'] = True
+    #     st.success("Company resources uploaded successfully!")
+    # else:
+    #     st.session_state['company_files_ready'] = False
+
+    col1, col2, _ = st.columns([2, 2, 2])
+    with col1:
+        upload_btn = st.button(
+            "📤 Upload",
+            disabled=not (company_files and len(company_files) > 0),
+            help="Upload company resources to assess against the knowledge base."
+        )
+    with col2:
+        clear_btn = st.button(
+            "🗑️ Clear",
+            help="Clear uploaded company resources.",
+            key="clear_company_files_btn"
+        )
+    if upload_btn:
+        with st.spinner("Processing company resources..."):
+            # Here you can process the company files if needed            
+            company_docs =  save_and_load_files(company_files)
+            llm_chain.initialize(selected_model)
+            company_kb_vectorstore = llm_chain.build_company_knowledge_base(company_docs)
+            st.session_state['company_kb_vectorstore'] = company_kb_vectorstore           
+            st.session_state['company_files_ready'] = True
+            if( st.session_state['company_kb_vectorstore'] and st.session_state['company_files_ready']):
+                st.session_state['company_kb_vectorstore'].save_local(COMPANY_VECTORSTORE_PATH)
+    if clear_btn:
+        if os.path.exists(COMPANY_VECTORSTORE_PATH):
+            shutil.rmtree(COMPANY_VECTORSTORE_PATH)
+        st.session_state['company_files'] = None
+        st.session_state['company_files_ready'] = False        
+        if hasattr(st, "rerun"):
+            st.rerun()
+        else:
+            st.experimental_rerun()
+        st.success("🚮 Company resources cleared successfully!")
+    
+    if st.session_state.get('company_files_ready', False):
+        # if(st.session_state.get('kb_loaded_from_saved', False)):
+        #     merged_vectorstore = llm_chain.merge_knowledge_bases(
+        #         st.session_state['kb_vectorstore'],
+        #         st.session_state['company_kb_vectorstore']
+        #     )
+        #     st.session_state['merged_vectorstore'] = merged_vectorstore        
+            
+        st.success("✅ Company resources uploaded and ready for assessment!")   
+
 # --- Step 2: Upload Evidence Files ---
-with st.expander("2️⃣ Upload evidence files", expanded=True):   
+with st.expander("3️⃣ Upload evidence files", expanded=True):   
     evidence_files = st.file_uploader(
         "Upload Evidence (Logs, Configs, Screenshots - PDF, TXT, CSV, XLSX, JPEG)",
         type=["pdf", "txt", "csv", "xlsx", "jpeg", "jpg"], accept_multiple_files=True
     )
-                
+
     evidence_ready = st.session_state.get('kb_ready') and (evidence_files is not None and len(evidence_files) > 0)
-    process_btn = st.button("🧮 Process evidence & generate workbook", disabled=not evidence_ready, help="Assess uploaded evidence using the knowledge base and generate an audit workbook.")
+
+    col1, col2, _ = st.columns([2, 2, 2])
+    with col1:
+        upload_evidence_btn = st.button(
+            "📤 Upload Evidence",
+            disabled=not (evidence_files and len(evidence_files) > 0),
+            help="Upload evidence files to assess against the knowledge base."
+        )
+    with col2:
+        process_btn = st.button(
+            "🧮 Process evidence & generate workbook",
+            disabled=not evidence_ready,  # Initially disabled until evidence is uploaded
+            help="Assess uploaded evidence using the knowledge base and generate an audit workbook."
+        )
+    
+    if upload_evidence_btn:
+        with st.spinner("Processing evidence..."):
+            evidence_docs = save_and_load_files(evidence_files)
+            evid_vectorstore = build_evidence_vectorstore(evidence_docs)
+            st.session_state['evid_vectorstore'] = evid_vectorstore
+            st.session_state['evidence_kb_ready'] = True
+            st.toast("✅ Evidence Uploaded Successfully!")
+
+    if st.session_state.get('evidence_kb_ready', True):
+         st.success("✅ Evidence Uploaded Successfully")
 
     if process_btn and evidence_ready:
         with st.spinner("Assessing evidence using knowledge base..."):
-            evidence_docs = save_and_load_files(evidence_files)
-            ed_vectorstore = build_evidence_vectorstore(evidence_docs)
+            evidence_docs = save_and_load_files(evidence_files)           
             assessment = assess_evidence_with_kb(
                 evidence_docs,
-                st.session_state['kb_vectorstore']
+                st.session_state['kb_vectorstore'],
+                st.session_state['company_kb_vectorstore']
             )
             workbook_path = generate_workbook(assessment)
             st.session_state['assessment'] = assessment
             st.session_state['workbook_path'] = workbook_path
             st.session_state['assessment_done'] = True
-            st.session_state['ed_vectorstore'] = ed_vectorstore
+           
         st.success("✅ Evidence processed! Audit workbook ready.")
         st.info("You can now download the audit workbook and chat with the assistant.")  
 
@@ -264,8 +372,8 @@ with st.expander("4️⃣ Chat with the agent", expanded=True):
         st.toast(f"Currently selected model: **{selected_model}**") 
 
     st.subheader("Chat with the Audit Bot")
-    chat_with_bot(st.session_state['kb_vectorstore'], st.session_state['assessment'], st.session_state['ed_vectorstore'],st.session_state['selected_model'])
-    if st.session_state.get('assessment_done') or st.session_state.get('kb_ready'):
+    chat_with_bot(st.session_state['kb_vectorstore'], st.session_state['company_kb_vectorstore'], st.session_state['assessment'], st.session_state['evid_vectorstore'], st.session_state['merged_vectorstore'], st.session_state['selected_model'])
+    if st.session_state.get('assessment_done') or st.session_state.get('kb_ready') or st.session_state.get('company_files_ready'):
         st.info("You can now ask questions about your audit and evidence. The bot will assist you based on the knowledge base and processed evidence.")
     else:
         st.warning("Please upload policies and evidence files, then train the bot to start chatting.")

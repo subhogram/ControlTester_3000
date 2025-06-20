@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_ollama import OllamaEmbeddings, OllamaLLM
+from langchain.chains import LLMChain
 from reportlab.lib.pagesizes import A4
 from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable)
 from reportlab.lib import colors
@@ -13,6 +14,7 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 
 import logging
 from langchain.schema import Document
+from langchain.prompts import PromptTemplate
 embeddings = OllamaEmbeddings(model="llama2")  # Ensure faiss-gpu is installed for GPU usage
 llm = OllamaLLM(model="llama2")
 
@@ -35,25 +37,30 @@ logger = logging.getLogger(__name__)
 
 # LangChain components
 text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=512,
-    chunk_overlap=64,
-    length_function=len,
-    add_start_index=True
+    chunk_size=800,  # Larger chunks for policy context
+    chunk_overlap=100,
+    length_function=len,    
+    add_start_index=True,
+    separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]    
 )
 
-# ----------------- KNOWLEDGE BASE BUILDER -----------------
+# ----------------- BASE KNOWLEDGE BASE BUILDER -----------------------
 
-def build_knowledge_base(docs):
-    #Build knowledge base with metadata indexing
+def build_knowledge_base(docs, batch_size=15):
+    """
+    Build a FAISS vectorstore from a list of documents with metadata indexing.
+    Embeddings are batched to avoid overloading the embedding server.
+    """
+    import time
     start = time.time()
     texts = []
     metadatas = []
+
     for i, doc in enumerate(docs):
         try:
             if not doc.page_content.strip():
                 continue
             splits = text_splitter.split_text(doc.page_content)
-            # If doc has metadata, propagate it to each split
             meta = getattr(doc, "metadata", {}) if hasattr(doc, "metadata") else {}
             for split in splits:
                 texts.append(split)
@@ -64,58 +71,132 @@ def build_knowledge_base(docs):
     if not texts:
         raise ValueError("No valid content found in input documents.")
 
+    # Batch embedding + FAISS addition
     try:
-        kb_vectorstore = FAISS.from_texts(texts, embedding=embeddings, metadatas=metadatas)
-        logger.info(f"Vector store built successfully with {kb_vectorstore.index.ntotal} vectors.")        
+        all_embeddings = []
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            batch_embeddings = embeddings.embed_documents(batch_texts)
+            all_embeddings.extend(batch_embeddings)
+
+        # Build FAISS index manually
+        kb_vectorstore = FAISS(embedding=embeddings)
+        kb_vectorstore.index.add(np.array(all_embeddings).astype('float32'))  # FAISS expects float32
+        kb_vectorstore.index_to_docstore_id = {i: str(i) for i in range(len(texts))}
+        kb_vectorstore.docstore.add_documents([
+            Document(page_content=texts[i], metadata=metadatas[i]) for i in range(len(texts))
+        ])
+
+        logger.info(f"Vector store built successfully with {kb_vectorstore.index.ntotal} vectors.")
     except Exception as e:
         logger.critical(f"Vector store creation failed: {e}")
-        raise 
-    
+        raise
+
     logger.info(f"Knowledge base built in {time.time() - start:.2f} seconds.")
     return kb_vectorstore
 
-# ----------------- SINGLE EVIDENCE ASSESSMENT -----------------
+# ------------------- COMPANY KNOWLEDGE BASE BUILDER -------------------
 
-def _assess_single_evidence(evid_text, kb_vectorstore, chunk_index=0, doc_index=0):
+company_text_splitter = RecursiveCharacterTextSplitter(
+    chunk_size=800,  # Larger chunks for policy context
+    chunk_overlap=100,
+    length_function=len,
+    add_start_index=True,
+    separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
+)
+
+def build_company_knowledge_base(docs):
+    """
+    Builds a knowledge base vectorstore from the provided documents using the company-specific text splitter.
+    Returns the vectorstore object.
+    """
+    start = time.time()
+    all_texts = []
+    all_metadatas = []
+    total_chunks = 0
+    processed_files = 0
+
+    for i, doc in enumerate(docs):
+        try:
+            if not doc.page_content.strip():
+                logger.warning(f"Document {i} is empty and skipped.")
+                continue
+            
+            splits = company_text_splitter.split_text(doc.page_content)
+            meta = getattr(doc, "metadata", {}) if hasattr(doc, "metadata") else {}
+            
+            for split_idx, split in enumerate(splits):
+                if not split.strip():
+                    continue
+                
+                # Create metadata for each split
+                split_metadata = meta.copy()
+                split_metadata["split_index"] = split_idx
+                split_metadata["total_splits"] = len(splits)
+                
+                all_texts.append(split)
+                all_metadatas.append(split_metadata)
+                total_chunks += 1
+            
+            processed_files += 1
+            
+        except Exception as e:
+            logger.error(f"Error processing document {i}: {e}")
+            continue
+
+    if not all_texts:
+        raise ValueError("No valid content found in input documents.")
+
+    logger.info(f"Processed {processed_files} files into {total_chunks} chunks")
+
     try:
-        relevant_contexts = kb_vectorstore.similarity_search(evid_text, k=3)
-        kb_context = "\n\n".join([getattr(c, "page_content", str(c)) for c in relevant_contexts])
-
-        prompt = (
-            "You are a cyber-security risk and control auditor.\n"
-            "Your task is to assess the provided evidence against relevant policies and standards.\n"
-            "You will receive a snippet of evidence and the context of relevant policies or reports.\n"
-            f"Evidence snippet:\n{evid_text}\n\n"
-            f"Policy/report context:\n{kb_context}\n\n"
-            "1. Determine the type of evidence, such as DB log, password log, configuration file, etc. The log type is typically indicated in the first few lines of the log file.\n"
-            "2. Evaluate how well it complies (compliant or non-compliant) with the relevant policy context and the standards set forth in SOC 2/CRI.\n"
-            "3. Provide the control statement from the relevant policy or applicable CRI to test the evidence.\n"
-            "4. If compliant, return 'Compliant' with no further details.\n"
-            "5. If the evidence does not comply, return 'Non-Compliant' and provide the log entry where it fails to meet the control, along with the rationale explaining why it does not adhere to the control statement.\n"
-            "6. Identify any potential improvements and propose effective remedies as needed. If remedies are already documented and visible in the logs, be sure to highlight those as well.\n"
-            "7. Provide the time when the log was generated, if available. It can be found by observing the timestamps on the log entries\n"
-            "8. If the evidence is not relevant to any control, return 'Not Applicable' and explain why.\n\n"
-
-            "Provide response in below format:\n"
-            "Control Statement: <control statement>\n"
-            "Assessment: <Compliant/Non-Compliant>\n"
-            "Evidence Type: <evidence type>\n"           
-            "Log Entry: <If non-compliant, print log entry>\n"
-            "Rationale: <if non-compliant, the rationale for failure>\n"
-            "Improvements: <if applicable, provide suggestions for improvement/remedy measures>\n"
-            "Evidence Time: <if available, the time when the log was generated>\n"
-        )
-        answer = llm.invoke(prompt)
-        return {            
-            "assessment": answer
-        }
+        company_vectorstore = FAISS.from_texts(all_texts, embedding=embeddings, metadatas=all_metadatas)
+        logger.info(f"Company vector store built successfully with {company_vectorstore.index.ntotal} vectors.")
+        
+        # Log category distribution
+        category_counts = {}
+        for meta in all_metadatas:
+            cat = meta.get("category", "unknown")
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+        
+        logger.info("Category distribution:")
+        for cat, count in sorted(category_counts.items()):
+            logger.info(f"  {cat}: {count} chunks")
+            
     except Exception as e:
-        logger.error(f"Assessment failed for chunk {chunk_index} (doc {doc_index}): {e}")
-        return {
-            "assessment": f"Error: {e}"
-        }
+        logger.critical(f"Company vector store creation failed: {e}")
+        raise
+    
+    build_time = time.time() - start
+    logger.info(f"Company knowledge base built in {build_time:.2f} seconds.")
+    
+    return company_vectorstore
 
-# ----------------- PARALLEL EVIDENCE ASSESSMENT -----------------
+# ------------------ MERGE KNOWLEDGE BASES ------------------   
+def merge_knowledge_bases(kb_vectorstore, company_vectorstore):
+    """
+    Merges the main knowledge base with the company-specific knowledge base.
+    Returns the merged vectorstore object.
+    """
+    start = time.time()
+    
+    if not kb_vectorstore or not company_vectorstore:
+        raise ValueError("Both knowledge bases must be provided for merging.")
+    
+    try:
+        # Merge company_vectorstore into kb_vectorstore
+        kb_vectorstore.merge_from(company_vectorstore)
+        merged_vectorstore = kb_vectorstore
+
+        logger.info(f"Merged vector store created with {merged_vectorstore.index.ntotal} vectors.")
+    except Exception as e:
+        logger.critical(f"Failed to merge knowledge bases: {e}")
+        raise
+    
+    logger.info(f"Knowledge bases merged in {time.time() - start:.2f} seconds.")
+    return merged_vectorstore
+
+# ----------------- PARALLEL EVIDENCE ASSESSMENT ------------------------
 def build_evidence_vectorstore(evidence_docs):
     """
     Builds a FAISS vectorstore from the provided evidence documents.
@@ -133,7 +214,7 @@ def build_evidence_vectorstore(evidence_docs):
                 texts.append(split)
                 metadatas.append(meta)
         except Exception as e:
-            logger.error(f"Error processing evidence document {i}: {e}")
+            logger.error(f"Error uploading evidence document {i}: {e}")
 
     if not texts:
         raise ValueError("No valid content found in evidence documents.")
@@ -147,7 +228,8 @@ def build_evidence_vectorstore(evidence_docs):
 
     return evidence_vectorstore
 
-def assess_evidence_with_kb(evidence_docs, kb_vectorstore, max_workers=4):
+# ----------------- ASSESS EVIDENCE WITH KNOWLEDGE BASE -----------------
+def assess_evidence_with_kb(evidence_docs, kb_vectorstore, company_kb_vectorstore, max_workers=4):
     start = time.time()
     evid_texts, chunk_origin = [], []
 
@@ -166,15 +248,13 @@ def assess_evidence_with_kb(evidence_docs, kb_vectorstore, max_workers=4):
 
     if not evid_texts:
         logger.warning("No valid evidence found.")
-        return []
-
-    evid_vectorstore = build_evidence_vectorstore(evidence_docs)
+        return []    
 
     logger.info(f"Assessing {len(evid_texts)} evidence chunks using {max_workers} threads...")
     results = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
-            executor.submit(_assess_single_evidence, evid_texts[i], kb_vectorstore, i, chunk_origin[i])
+            executor.submit(_assess_single_evidence, evid_texts[i], kb_vectorstore, company_kb_vectorstore, i, chunk_origin[i])
             for i in range(len(evid_texts))
         ]
         for future in as_completed(futures):
@@ -182,6 +262,78 @@ def assess_evidence_with_kb(evidence_docs, kb_vectorstore, max_workers=4):
 
     logger.info(f"Assessment completed in {time.time() - start:.2f} seconds.")
     return results
+
+# ----------------- SINGLE EVIDENCE ASSESSMENT -----------------
+
+def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore ,chunk_index=0, doc_index=0):
+    try:
+         # Retrieve relevant base context
+        base_contexts = kb_vectorstore.similarity_search(evid_text, k=3)
+        knowledge_base_context = "\n\n".join([getattr(c, "page_content", str(c)) for c in base_contexts])
+        # Retrieve relevant company-specific context
+        company_contexts = company_kb_vectorstore.similarity_search(evid_text, k=3)
+        company_knowledge_base_context = "\n\n".join([getattr(c, "page_content", str(c)) for c in company_contexts])
+
+
+        cybersecurity_audit_prompt = PromptTemplate(
+            input_variables=[
+                "knowledge_base_context",
+                "company_knowledge_base_context",
+                "evidence_context"
+               
+            ],
+            template="""
+                You are a highly skilled cyber-security risk and control auditor.
+
+                    Your task is to assess the provided evidence, and perform relevant analysis based on the following contextual information:
+
+                    --- General Cybersecurity Knowledge Base ---
+                    {knowledge_base_context}
+
+                    --- Company-Specific Cybersecurity Policies ---
+                    {company_knowledge_base_context}
+
+                    --- Evidence from Logs or Files ---
+                    {evidence_context}
+
+                    Instructions:
+                    1. Identify the type of evidence provided (e.g., DB log, password log, configuration file, event log, etc.). The log type is usually indicated in the first few lines or metadata.
+                    2. Assess the evidence for compliance with all relevant policies, standards, and frameworks (including SOC 2, CRI, and company policies).
+                    3. Extract and state the most relevant control statement or requirement from the context that applies.
+                    4. If the evidence is compliant, state 'Compliant' and briefly confirm why.
+                    5. If the evidence is not compliant, state 'Non-Compliant', cite the specific log entry or artifact where the failure occurs, and provide a clear rationale for non-compliance.
+                    6. If the evidence is not applicable to any known controls, respond with 'Not Applicable' and explain why.
+                    7. Suggest improvements or remedies for any gaps or weaknesses found. If remedies are already documented or visible, highlight them.
+                    8. Extract and state the timestamp of the evidence, if available, by analyzing log entries or metadata.
+                    9. If the user requests any kind of analysis or report (including compliance analysis), perform the analysis and format your response so it is suitable for inclusion in a professional PDF report.
+
+                    Provide your response in the following structured format:
+                    Control Statement: <the most relevant control statement>
+                    Assessment: <Compliant/Non-Compliant/Not Applicable>
+                    Evidence Type: <type of evidence>
+                    Log Entry: <if non-compliant, the specific entry or artifact>
+                    Rationale: <explanation for failure or irrelevance>
+                    Improvements: <suggestions for remedy or highlight documented remedies>
+                    Evidence Time: <timestamp from log or evidence, if available>
+                    Analysis/Recommendations: <summary of analysis, findings, or answers to the user's question>
+                    """
+            )
+        chain = LLMChain(llm=llm, prompt=cybersecurity_audit_prompt)
+      
+        response = response = chain.run({
+                "knowledge_base_context" : knowledge_base_context,
+                "company_knowledge_base_context": company_knowledge_base_context,
+                "evidence_context" : evid_text
+            })
+        return {            
+            "assessment": response
+        }
+    except Exception as e:
+        logger.error(f"Assessment failed for chunk {chunk_index} (doc {doc_index}): {e}")
+        return {
+            "assessment": f"Error: {e}"
+        }
+
 
 # ----------------- KPMG-STYLED CORPORATE REPORT PDF EXPORT -----------------
 

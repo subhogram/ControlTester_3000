@@ -1,6 +1,8 @@
 import streamlit as st
 from utils.find_llm import _ollama_models
 from langchain_ollama import OllamaLLM
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 import logging
 
 # Setup Logging
@@ -55,8 +57,7 @@ def bot_chat_box(message):
         unsafe_allow_html=True,
     )
 
-
-def chat_with_bot(kb_vectorstore, assessment, ed_vectorstore, selected_model):    
+def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vectorstore, merged_vectorstore, selected_model):    
     st.markdown(
         f"""
         <style>
@@ -102,38 +103,56 @@ def chat_with_bot(kb_vectorstore, assessment, ed_vectorstore, selected_model):
         kb_contexts = kb_vectorstore.similarity_search(user_input, k=3)
         kb_context = "\n\n".join([c.page_content for c in kb_contexts])
 
-        ed_contexts = ed_vectorstore.similarity_search(user_input, k=3)
-        ed_context = "\n\n".join([c.page_content for c in ed_contexts])
+        company_contexts = company_kb_vectorstore.similarity_search(user_input, k=3)
+        company_kb_context = "\n\n".join([c.page_content for c in company_contexts])
 
-        logger.info(f"Using model: {selected_model} for chat response")      
-        
-        # Use both the knowledge base and the assessment for context
-       
-        prompt = (
-            f"You are an information security audit assistant.\n"
-            f"You possess deep knowledge of cyber security risk control policies and reports.\n"
-            f"You possess skills of cyber crisis leadership and strategic planning for risk analysis, resilience design and control implementation and document writing.\n"
-            f"1. You will gain insights and knowledge from Policy context and evaluate the scenarios from the evidence context to answer the user question.\n"
-            f"2. If the user refers to a file name, quote the file name and its associated context and metadata to answer accurately.\n"
-            f"3. If user asks question not related to context, just say that 'I don't know' but don't make up an answer on your own.\n"
-            f"4. When doing comparison, try to answer in a tabular format with rows and columns.\n"
-            f"5. Try to answer in visually appealing manner with markdown formatting, tables, bullet points, and other formatting techniques.\n"
-            f"6. Always quote policy/regulatory statements and file name from Policy Context (with metadata) when making an answer.\n"
-            f"7. Always quote evidence statements and file name from Evidence Context (with metadata) when making an answer.\n"
-            f"User question: {user_input}\n"
-            f"Policy Context (with metadata):\n{kb_context}\n"
-            f"Evidence Context (with metadata):\n{ed_context}\n"
+        evid_contexts = evid_vectorstore.similarity_search(user_input, k=3)
+        evid_context = "\n\n".join([c.page_content for c in evid_contexts])
+
+        logger.info(f"Using model: {selected_model} for chat response")  
+
+        cybersecurity_bot_prompt = PromptTemplate(
+            input_variables=[
+                "user_input",
+                "kb_context",
+                "company_kb_context",
+                "evid_context"
+            ],
+            template="""
+                    You are a highly capable cybersecurity assistant. You have access to the following contextual sources:
+
+                    --- BASE CYBERSECURITY KNOWLEDGE ---
+                    {kb_context}
+
+                    --- COMPANY CYBERSECURITY POLICIES ---
+                    {company_kb_context}
+
+                    --- EVIDENCE (LOGS, FILES, OBSERVATIONS) ---
+                    {evid_context}
+
+                    --- USER QUESTION OR TASK ---
+                    {user_input}
+
+                    Instructions:
+                    - Answer any question regarding cybersecurity, company policy, security audit, analysis of logs, compliance, or best practices, using the most relevant context above.
+                    - If asked to perform an analysis, provide a thorough, step-by-step evaluation.
+                    - If asked for a report or compliance summary, format your answer as a clear, well-structured analysis that can be directly used for PDF generation.
+                    - Always reference the context you used in your answer.
+                    - If information is missing, clearly state the assumptions or request clarification.
+
+                    Your output should be to the point, detailed, actionable, tabular (if doing comparisions) and ready for inclusion in a professional PDF report.
+                    """
         )
 
-        if(assessment is not None and len(assessment) > 0):
-            assessment_context = "\n\n".join(a['assessment'] for a in assessment[:3])
-            prompt.join(
-                f"5. You need to provide summarized analytical answers based on assessment report by tallying them to context.\n"
-                f"Assessment report:\n{assessment_context}\n\n")
-
-              
-        response = llm.invoke(prompt)
-        logger.info(f"Generated Prompt: {prompt}")
+        chain = LLMChain(llm=llm, prompt=cybersecurity_bot_prompt)
+      
+        response = response = chain.run({
+                "user_input": user_input,
+                "kb_context": kb_context,
+                "company_kb_context": company_kb_context,
+                "evid_context": evid_context
+            })
+        logger.info(f"Generated Prompt: {cybersecurity_bot_prompt}")
         logger.info(f"User input: {user_input}")
         st.session_state["chat_history"].append({"user": user_input, "bot": response})
         if hasattr(st, "rerun"):
