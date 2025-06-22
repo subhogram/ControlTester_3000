@@ -8,13 +8,23 @@ from langchain_community.vectorstores import FAISS
 from langchain_ollama import OllamaEmbeddings, OllamaLLM
 from langchain.chains import LLMChain
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable)
+from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable, Table, TableStyle)
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-
 import logging
 from langchain.schema import Document
 from langchain.prompts import PromptTemplate
+import threading
+from typing import List, Dict, Any, Tuple, Optional
+from dataclasses import dataclass
+from queue import Queue
+import re
+
+from itertools import islice
+
+
+
+
 embeddings = OllamaEmbeddings(model="llama2")  # Ensure faiss-gpu is installed for GPU usage
 llm = OllamaLLM(model="llama2")
 
@@ -46,53 +56,87 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 # ----------------- BASE KNOWLEDGE BASE BUILDER -----------------------
 
-def build_knowledge_base(docs, batch_size=15):
+def build_knowledge_base(docs, batch_size=5, delay_between_batches=1.0, max_retries=3):
     """
-    Build a FAISS vectorstore from a list of documents with metadata indexing.
-    Embeddings are batched to avoid overloading the embedding server.
+    Build a FAISS vectorstore from a list of documents with timeout handling.
+    This is a drop-in replacement for your existing function.
     """
-    import time
-    start = time.time()
-    texts = []
-    metadatas = []
 
+    start = time.time()
+    all_documents = []
+
+    # Extract and split texts into Document objects
     for i, doc in enumerate(docs):
         try:
             if not doc.page_content.strip():
                 continue
             splits = text_splitter.split_text(doc.page_content)
             meta = getattr(doc, "metadata", {}) if hasattr(doc, "metadata") else {}
+            
             for split in splits:
-                texts.append(split)
-                metadatas.append(meta)
+                all_documents.append(Document(page_content=split, metadata=meta))
+                
         except Exception as e:
             logger.error(f"Error processing document {i}: {e}")
 
-    if not texts:
+    if not all_documents:
         raise ValueError("No valid content found in input documents.")
 
-    # Batch embedding + FAISS addition
-    try:
-        all_embeddings = []
-        for i in range(0, len(texts), batch_size):
-            batch_texts = texts[i:i + batch_size]
-            batch_embeddings = embeddings.embed_documents(batch_texts)
-            all_embeddings.extend(batch_embeddings)
+    logger.info(f"Processing {len(all_documents)} documents in batches of {batch_size}")
 
-        # Build FAISS index manually
-        kb_vectorstore = FAISS(embedding=embeddings)
-        kb_vectorstore.index.add(np.array(all_embeddings).astype('float32'))  # FAISS expects float32
-        kb_vectorstore.index_to_docstore_id = {i: str(i) for i in range(len(texts))}
-        kb_vectorstore.docstore.add_documents([
-            Document(page_content=texts[i], metadata=metadatas[i]) for i in range(len(texts))
-        ])
+    # Process in batches to avoid timeouts
+    try:
+        kb_vectorstore = None
+        total_batches = (len(all_documents) + batch_size - 1) // batch_size
+        
+        for batch_idx in range(0, len(all_documents), batch_size):
+            batch_docs = all_documents[batch_idx:batch_idx + batch_size]
+            current_batch_num= (batch_idx // batch_size) + 1
+            
+            logger.info(f"Processing batch {current_batch_num}/{total_batches} ({len(batch_docs)} documents)")
+            
+            # Retry logic for each batch
+            batch_success = False
+            for attempt in range(max_retries):
+                try:
+                    if kb_vectorstore is None:
+                        # Create initial vectorstore from first batch
+                        kb_vectorstore = FAISS.from_documents(batch_docs, embeddings)
+                    else:
+                        # Create temporary vectorstore for this batch and merge
+                        temp_vectorstore = FAISS.from_documents(batch_docs, embeddings)
+                        kb_vectorstore.merge_from(temp_vectorstore)
+                    
+                    batch_success = True
+                    break  # Success, exit retry loop
+                    
+                except Exception as e:
+                    logger.warning(f"Batch {current_batch_num} attempt {attempt + 1} failed: {e}")
+                    if attempt < max_retries - 1:
+                        # Exponential backoff
+                        wait_time = delay_between_batches * (2 ** attempt)
+                        logger.info(f"Retrying in {wait_time:.1f} seconds...")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"Batch {current_batch_num} failed after {max_retries} attempts")
+                        raise
+            
+            if not batch_success:
+                raise Exception(f"Failed to process batch {current_batch_num}")
+            
+            # Delay between batches (except for the last one)
+            if current_batch_num < total_batches:
+                logger.debug(f"Waiting {delay_between_batches}s before next batch...")
+                time.sleep(delay_between_batches)
 
         logger.info(f"Vector store built successfully with {kb_vectorstore.index.ntotal} vectors.")
+        
     except Exception as e:
         logger.critical(f"Vector store creation failed: {e}")
         raise
 
-    logger.info(f"Knowledge base built in {time.time() - start:.2f} seconds.")
+    total_time = time.time() - start
+    logger.info(f"Knowledge base built in {total_time:.2f} seconds.")
     return kb_vectorstore
 
 # ------------------- COMPANY KNOWLEDGE BASE BUILDER -------------------
@@ -105,9 +149,20 @@ company_text_splitter = RecursiveCharacterTextSplitter(
     separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
 )
 
-def build_company_knowledge_base(docs):
+
+def build_company_knowledge_base(
+    docs,
+    max_workers=8,
+    max_retries=2,
+    retry_delay=0.5,
+    batch_size=10,
+    batch_vectorstore=True,
+    batch_vectorstore_size=1000,
+):
     """
     Builds a knowledge base vectorstore from the provided documents using the company-specific text splitter.
+    Processes documents in parallel using threads, with batch processing and a max retries option for each document.
+    To avoid server/terminal timeouts, optionally builds the vectorstore in batches and merges them at the end.
     Returns the vectorstore object.
     """
     start = time.time()
@@ -116,60 +171,113 @@ def build_company_knowledge_base(docs):
     total_chunks = 0
     processed_files = 0
 
-    for i, doc in enumerate(docs):
-        try:
-            if not doc.page_content.strip():
-                logger.warning(f"Document {i} is empty and skipped.")
-                continue
-            
-            splits = company_text_splitter.split_text(doc.page_content)
-            meta = getattr(doc, "metadata", {}) if hasattr(doc, "metadata") else {}
-            
-            for split_idx, split in enumerate(splits):
-                if not split.strip():
-                    continue
-                
-                # Create metadata for each split
-                split_metadata = meta.copy()
-                split_metadata["split_index"] = split_idx
-                split_metadata["total_splits"] = len(splits)
-                
-                all_texts.append(split)
-                all_metadatas.append(split_metadata)
-                total_chunks += 1
-            
-            processed_files += 1
-            
-        except Exception as e:
-            logger.error(f"Error processing document {i}: {e}")
-            continue
+    def process_doc_with_retries(i, doc):
+        last_exception = None
+        for attempt in range(max_retries + 1):
+            try:
+                if not doc.page_content.strip():
+                    logger.warning(f"Document {i} is empty and skipped.")
+                    return [], []
+                splits = company_text_splitter.split_text(doc.page_content)
+                meta = getattr(doc, "metadata", {}) if hasattr(doc, "metadata") else {}
+                doc_texts = []
+                doc_metas = []
+                for split_idx, split in enumerate(splits):
+                    if not split.strip():
+                        continue
+                    split_metadata = meta.copy()
+                    split_metadata["split_index"] = split_idx
+                    split_metadata["total_splits"] = len(splits)
+                    doc_texts.append(split)
+                    doc_metas.append(split_metadata)
+                return doc_texts, doc_metas
+            except Exception as e:
+                last_exception = e
+                logger.error(f"Error processing document {i} (attempt {attempt + 1}/{max_retries + 1}): {e}")
+                if attempt < max_retries:
+                    time.sleep(retry_delay)
+        logger.critical(f"Document {i} failed after {max_retries + 1} attempts: {last_exception}")
+        return [], []
+
+    def batch(iterable, n):
+        """Yield successive n-sized batches from iterable."""
+        for i in range(0, len(iterable), n):
+            yield iterable[i:i + n]
+
+    total_batches = (len(docs) + batch_size - 1) // batch_size
+    current_batch_num = 0
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for doc_batch in batch(list(enumerate(docs)), batch_size):
+            current_batch_num += 1
+            batch_docs = [doc for _, doc in doc_batch]
+            logger.info(
+                f"Processing batch {current_batch_num}/{total_batches} ({len(batch_docs)} documents)"
+            )
+            future_to_index = {
+                executor.submit(process_doc_with_retries, i, doc): i
+                for i, doc in doc_batch
+            }
+            for future in as_completed(future_to_index):
+                i = future_to_index[future]
+                try:
+                    doc_texts, doc_metas = future.result()
+                    if doc_texts:
+                        all_texts.extend(doc_texts)
+                        all_metadatas.extend(doc_metas)
+                        processed_files += 1
+                        total_chunks += len(doc_texts)
+                except Exception as exc:
+                    logger.error(f"Document {i} generated an exception: {exc}")
 
     if not all_texts:
         raise ValueError("No valid content found in input documents.")
 
     logger.info(f"Processed {processed_files} files into {total_chunks} chunks")
 
+    # To avoid server/terminal timeouts, build the vectorstore in batches and merge if necessary
     try:
-        company_vectorstore = FAISS.from_texts(all_texts, embedding=embeddings, metadatas=all_metadatas)
-        logger.info(f"Company vector store built successfully with {company_vectorstore.index.ntotal} vectors.")
-        
+        if batch_vectorstore and len(all_texts) > batch_vectorstore_size:
+            logger.info(
+                f"Building vectorstore in batches of {batch_vectorstore_size} to avoid timeouts..."
+            )
+            vectorstores = []
+            for batch_num, (text_batch, meta_batch) in enumerate(
+                zip(batch(all_texts, batch_vectorstore_size), batch(all_metadatas, batch_vectorstore_size)), 1
+            ):
+                logger.info(
+                    f"Building vectorstore batch {batch_num}/"
+                    f"{(len(all_texts) + batch_vectorstore_size - 1) // batch_vectorstore_size} "
+                    f"({len(text_batch)} chunks)"
+                )
+                vs = FAISS.from_texts(text_batch, embedding=embeddings, metadatas=meta_batch)
+                vectorstores.append(vs)
+            # Merge all vectorstores into one
+            company_vectorstore = vectorstores[0]
+            for vs in vectorstores[1:]:
+                company_vectorstore.merge_from(vs)
+            logger.info(f"Company vector store (batched) built successfully with {company_vectorstore.index.ntotal} vectors.")
+        else:
+            company_vectorstore = FAISS.from_texts(all_texts, embedding=embeddings, metadatas=all_metadatas)
+            logger.info(f"Company vector store built successfully with {company_vectorstore.index.ntotal} vectors.")
+
         # Log category distribution
         category_counts = {}
         for meta in all_metadatas:
             cat = meta.get("category", "unknown")
             category_counts[cat] = category_counts.get(cat, 0) + 1
-        
+
         logger.info("Category distribution:")
         for cat, count in sorted(category_counts.items()):
             logger.info(f"  {cat}: {count} chunks")
-            
+
     except Exception as e:
-        logger.critical(f"Company vector store creation failed: {e}")
+        logger.critical(f"Vector store creation failed: {e}")
         raise
-    
-    build_time = time.time() - start
-    logger.info(f"Company knowledge base built in {build_time:.2f} seconds.")
-    
+
+    total_time = time.time() - start
+    logger.info(f"Company Knowledge base built in {total_time:.2f} seconds.")
+
     return company_vectorstore
 
 # ------------------ MERGE KNOWLEDGE BASES ------------------   
@@ -229,6 +337,174 @@ def build_evidence_vectorstore(evidence_docs):
     return evidence_vectorstore
 
 # ----------------- ASSESS EVIDENCE WITH KNOWLEDGE BASE -----------------
+
+
+def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, chunk_index=0, doc_index=0):
+    try:
+       
+        base_contexts = kb_vectorstore.similarity_search(evid_text, k=10)
+        knowledge_base_context = "\n\n".join([getattr(c, "page_content", str(c)) for c in base_contexts])
+
+        company_contexts = company_kb_vectorstore.similarity_search(evid_text, k=10)
+        company_knowledge_base_context = "\n\n".join([getattr(c, "page_content", str(c)) for c in company_contexts])
+
+
+        # prompt = (
+        #     "You are an information security auditor.\n"
+        #     f"Evidence snippet:\n{evid_text}\n\n"
+        #     f"Base knowledge:\n{knowledge_base_context}\n\n"
+        #     f"Company specific policy  knowledge:\n{company_knowledge_base_context}\n\n"
+        #     "1. Identify the type of evidence (e.g. DB log, password log, screenshot, config).\n"
+        #     "2. Assess its compliance with the policy context and SOC2/CRI.\n"
+        #     "3. Provide the control statement against which the evidence is tested.\n"
+        #     "4. if the evidence is not compliant, return 'Non-Compliant',log entry where it fails the control and rationale as to why it fails the control statement.\n"
+        #     "5. If compliant, return 'Compliant' with no further details.\n"
+        #     "6. Suggest improvements and reremedy if applicable. If remedy measures are already present and evident in logs, point those out.\n\n"
+
+        #     "Provide response in below format:\n"
+        #     "Control Statement: <control statement>\n"
+        #     "Assessment: <Compliant/Non-Compliant>\n"
+        #     "Evidence Type: <evidence type>\n"           
+        #     "Log Entry: <if Non-Compliant, log entry where it fails>\n"
+        #     "Rationale: <if Non-Compliant, rationale for failure>\n"
+        #     "Improvements: <if applicable, suggestions for improvement/remedy measures if Non-Compliant>\n"
+        # )
+        # answer = llm(prompt)
+        # return {            
+        #     "assessment": answer
+        # }
+
+        prompt = f"""
+                You are an expert cybersecurity auditor tasked with creating comprehensive audit workbooks and performing risk and control assessments. You have access to three key information sources:
+
+
+                GLOBAL RISK AND CONTROL STANDARDS:
+                {knowledge_base_context}
+
+                COMPANY-SPECIFIC RISK AND CONTROL STANDARDS (CRI PROFILE) and other COMPANY-SPECIFIC RISK AND CONTROL policy documents:
+                {company_knowledge_base_context}
+
+                LOG EVIDENCE AND SUPPORTING DOCUMENTATION:
+                {evid_text}
+
+                ## ANALYSIS INSTRUCTIONS
+
+                ### 1. CONTROL FRAMEWORK ANALYSIS
+                    - Compare the global standards with company-specific CRI profile standards
+                    - Identify gaps, conflicts, or inconsistencies between the two frameworks
+                    - Create a unified control testing matrix addressing both standard sets
+                    - Prioritize controls based on risk criticality and regulatory requirements
+
+                ### 2. EVIDENCE ASSESSMENT
+                    - Analyze all available log evidence and documentation
+                    - Categorize evidence by control domain (access control, data protection, incident response, etc.)
+                    - Assess evidence completeness and identify gaps requiring additional collection
+                    - Map evidence to specific control objectives and testing requirements               
+
+                ### 3. SPECIFIC ANALYSIS REQUIREMENTS
+
+                    **Log Evidence Analysis Guidelines:**
+                    - Access Logs: Verify authentication, authorization, and privilege controls
+                    - System Logs: Validate configuration management and change controls
+                    - Security Event Logs: Assess incident detection and response effectiveness
+                    - Application Logs: Review data handling and business process controls
+
+                    **Control Testing Methodology:**
+                    - Design Testing: Assess control design adequacy against standards
+                    - Implementation Testing: Verify proper control implementation
+                    - Operating Effectiveness: Validate consistent operation over time
+                    - Compensating Controls: Identify and evaluate alternative measures
+
+                    **Risk Assessment Approach:**
+                    - Apply quantitative analysis where metrics are available
+                    - Use qualitative assessments for complex scenarios
+                    - Consider control interdependencies and cumulative effects
+                    - Factor in current threat landscape and industry-specific risks
+
+                ### 4. DECISION-MAKING FRAMEWORK
+                    **When Standards Conflict:**
+                    - Prioritize regulatory requirements over internal policies
+                    - Apply the more stringent control requirement
+                    - Document rationale for all judgment calls
+                    - Flag significant interpretive issues for escalation        
+
+                    **When Evidence is Insufficient:**
+                    - Clearly document evidence gaps
+                    - Recommend specific additional evidence collection
+                    - Provide qualified conclusions with limitations noted
+                    - Suggest interim or compensating control measures
+
+                    **Quality Standards:**
+                    - Use clear, professional audit language
+                    - Provide evidence-based conclusions
+                    - Include risk-based prioritization
+                    - Offer actionable, realistic recommendations
+                    - Maintain objectivity throughout analysis
+
+                    **Format Requirements:**
+                    - Use structured headings and bullet points for clarity
+                    - Include tables or matrices where appropriate
+                    - Provide specific references to evidence analyzed
+                    - Quantify findings where possible
+
+                ### 5. AUDIT WORKBOOK CREATION
+                    
+                    ### 1. CONTROL STATEMENT
+                            -Must extract the exact control statement in quotes from the CRI profile that is being tested.
+
+                    ### 2. ASSESSMENT RESULT
+                            - Compliance Status: COMPLIANT / NON-COMPLIANT / PARTIALLY COMPLIANT.
+                            - Risk Level: CRITICAL / HIGH / MEDIUM / LOW.
+
+                    ### 3. LOG EVIDENCE
+                            - Source File: [Specify the exact log file name or evidence source]
+                            - Relevant Log Entries: [Copy exact lines from logs with timestamps and details]
+
+                    ### 4. ASSESSMENT RATIONALE
+                            For NON-COMPLIANT controls:
+                                - Why it failed: [Specific explanation based on log evidence]
+                                - Gap analysis: [What should happen vs. what actually happened]
+                                - Impact: [Security risk or business impact]
+
+                            For COMPLIANT controls:
+                                - Evidence of compliance: [How logs demonstrate control effectiveness]
+                                - Effectiveness assessment: [Quality of implementation]
+
+                    ### 5. IMPROVEMENT RECOMMENDATIONS
+                            Mandatory Improvements (for non-compliant):
+                                - Specific steps to achieve compliance [Quote from the relevant sources like CRI profile, company policy or other global policies]
+                                - Timeline recommendations
+                                - Responsible parties
+
+                            Enhancement Opportunities (even if compliant):
+                                - How to strengthen beyond company policy
+                                - Global security best practices to adopt. Quote the exact policy name and the policy statement / statements.
+                                - Technology or process improvements
+                
+                Ensure comprehensive coverage of all three information sources and producing a complete audit workbook framework.
+
+                Provide response in the below format:
+                1. CONTROL STATEMENT
+                2. ASSESSMENT RESULT
+                3. LOG EVIDENCE
+                4. ASSESSMENT RATIONALE
+                5. IMPROVEMENT RECOMMENDATIONS
+                
+                """
+        answer = llm(prompt)
+
+        return {
+            "assessment": answer            
+        }
+
+    except Exception as e:
+        logger.error(f"Assessment failed for chunk {chunk_index} (doc {doc_index}): {e}")
+        return {
+            "assessment": f"Error: {e}"
+        }
+
+# ----------------- PARALLEL EVIDENCE ASSESSMENT -----------------
+
 def assess_evidence_with_kb(evidence_docs, kb_vectorstore, company_kb_vectorstore, max_workers=4):
     start = time.time()
     evid_texts, chunk_origin = [], []
@@ -239,16 +515,15 @@ def assess_evidence_with_kb(evidence_docs, kb_vectorstore, company_kb_vectorstor
                 logger.warning(f"Evidence document {i} is empty and skipped.")
                 continue
             splits = text_splitter.split_text(doc.page_content)
-            #meta = getattr(doc, "metadata", {}) if hasattr(doc, "metadata") else {}
             evid_texts.extend(splits)
-            #evid_texts.extend(meta)
             chunk_origin.extend([i] * len(splits))
+            logger.info(f"Evidence document {i} split into {len(splits)} chunks.")
         except Exception as e:
             logger.error(f"Error splitting evidence document {i}: {e}")
 
     if not evid_texts:
         logger.warning("No valid evidence found.")
-        return []    
+        return []
 
     logger.info(f"Assessing {len(evid_texts)} evidence chunks using {max_workers} threads...")
     results = []
@@ -263,79 +538,7 @@ def assess_evidence_with_kb(evidence_docs, kb_vectorstore, company_kb_vectorstor
     logger.info(f"Assessment completed in {time.time() - start:.2f} seconds.")
     return results
 
-# ----------------- SINGLE EVIDENCE ASSESSMENT -----------------
-
-def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore ,chunk_index=0, doc_index=0):
-    try:
-         # Retrieve relevant base context
-        base_contexts = kb_vectorstore.similarity_search(evid_text, k=3)
-        knowledge_base_context = "\n\n".join([getattr(c, "page_content", str(c)) for c in base_contexts])
-        # Retrieve relevant company-specific context
-        company_contexts = company_kb_vectorstore.similarity_search(evid_text, k=3)
-        company_knowledge_base_context = "\n\n".join([getattr(c, "page_content", str(c)) for c in company_contexts])
-
-
-        cybersecurity_audit_prompt = PromptTemplate(
-            input_variables=[
-                "knowledge_base_context",
-                "company_knowledge_base_context",
-                "evidence_context"
-               
-            ],
-            template="""
-                You are a highly skilled cyber-security risk and control auditor.
-
-                    Your task is to assess the provided evidence, and perform relevant analysis based on the following contextual information:
-
-                    --- General Cybersecurity Knowledge Base ---
-                    {knowledge_base_context}
-
-                    --- Company-Specific Cybersecurity Policies ---
-                    {company_knowledge_base_context}
-
-                    --- Evidence from Logs or Files ---
-                    {evidence_context}
-
-                    Instructions:
-                    1. Identify the type of evidence provided (e.g., DB log, password log, configuration file, event log, etc.). The log type is usually indicated in the first few lines or metadata.
-                    2. Assess the evidence for compliance with all relevant policies, standards, and frameworks (including SOC 2, CRI, and company policies).
-                    3. Extract and state the most relevant control statement or requirement from the context that applies.
-                    4. If the evidence is compliant, state 'Compliant' and briefly confirm why.
-                    5. If the evidence is not compliant, state 'Non-Compliant', cite the specific log entry or artifact where the failure occurs, and provide a clear rationale for non-compliance.
-                    6. If the evidence is not applicable to any known controls, respond with 'Not Applicable' and explain why.
-                    7. Suggest improvements or remedies for any gaps or weaknesses found. If remedies are already documented or visible, highlight them.
-                    8. Extract and state the timestamp of the evidence, if available, by analyzing log entries or metadata.
-                    9. If the user requests any kind of analysis or report (including compliance analysis), perform the analysis and format your response so it is suitable for inclusion in a professional PDF report.
-
-                    Provide your response in the following structured format:
-                    Control Statement: <the most relevant control statement>
-                    Assessment: <Compliant/Non-Compliant/Not Applicable>
-                    Evidence Type: <type of evidence>
-                    Log Entry: <if non-compliant, the specific entry or artifact>
-                    Rationale: <explanation for failure or irrelevance>
-                    Improvements: <suggestions for remedy or highlight documented remedies>
-                    Evidence Time: <timestamp from log or evidence, if available>
-                    Analysis/Recommendations: <summary of analysis, findings, or answers to the user's question>
-                    """
-            )
-        chain = LLMChain(llm=llm, prompt=cybersecurity_audit_prompt)
-      
-        response = response = chain.run({
-                "knowledge_base_context" : knowledge_base_context,
-                "company_knowledge_base_context": company_knowledge_base_context,
-                "evidence_context" : evid_text
-            })
-        return {            
-            "assessment": response
-        }
-    except Exception as e:
-        logger.error(f"Assessment failed for chunk {chunk_index} (doc {doc_index}): {e}")
-        return {
-            "assessment": f"Error: {e}"
-        }
-
-
-# ----------------- KPMG-STYLED CORPORATE REPORT PDF EXPORT -----------------
+# ----------------- WORKBOOK EXPORT -----------------
 
 def generate_workbook(assessment, filename_prefix="audit_assessment"):
     """
@@ -351,16 +554,31 @@ def generate_workbook(assessment, filename_prefix="audit_assessment"):
         df = pd.DataFrame(assessment)
         if "assessment" in df.columns and df.shape[1] == 1:
             records = []
+            section_patterns = {
+                "CONTROL STATEMENT": r"(?:1\.\s*)?CONTROL STATEMENT[:\s]*([\s\S]*?)(?=(?:2\.?\s*ASSESSMENT RESULT|2\.?\s*COMPLIANCE STATUS|ASSESSMENT RESULT|COMPLIANCE STATUS|$))",
+                "ASSESSMENT RESULT": r"(?:2\.\s*)?ASSESSMENT RESULT[:\s]*([\s\S]*?)(?=(?:3\.?\s*LOG EVIDENCE|3\.?\s*EVIDENCE|LOG EVIDENCE|EVIDENCE|$))",
+                "LOG EVIDENCE": r"(?:3\.\s*)?LOG EVIDENCE[:\s]*([\s\S]*?)(?=(?:4\.?\s*ASSESSMENT RATIONALE|4\.?\s*RATIONALE|ASSESSMENT RATIONALE|RATIONALE|$))",
+                "ASSESSMENT RATIONALE": r"(?:4\.\s*)?ASSESSMENT RATIONALE[:\s]*([\s\S]*?)(?=(?:5\.?\s*IMPROVEMENT RECOMMENDATIONS|5\.?\s*RECOMMENDATIONS|IMPROVEMENT RECOMMENDATIONS|RECOMMENDATIONS|$))",
+                "IMPROVEMENT RECOMMENDATIONS": r"(?:5\.\s*)?IMPROVEMENT RECOMMENDATIONS[:\s]*([\s\S]*)"
+            }
             for ass in df["assessment"]:
-                data = {}
-                for line in ass.splitlines():
-                    if ": " in line:
-                        k, v = line.split(": ", 1)
-                        data[k.strip()] = v.strip()
-                records.append(data)
+                if isinstance(ass, dict):
+                    records.append(ass)
+                elif isinstance(ass, str):
+                    data = {}
+                    for key, pat in section_patterns.items():
+                        match = re.search(pat, ass, re.IGNORECASE)
+                        if match:
+                            data[key] = match.group(1).strip()
+                        else:
+                            data[key] = ""
+                    records.append(data)
+                else:
+                    logger.warning(f"Unknown assessment type: {type(ass)}")
+                    records.append({})
             df = pd.DataFrame(records)
         preferred_cols = [
-            "Control Statement", "Assessment", "Evidence Type", "Log Entry", "Rationale", "Improvements", "Log timestamp"
+            "CONTROL STATEMENT", "ASSESSMENT RESULT", "LOG EVIDENCE", "ASSESSMENT RATIONALE", "IMPROVEMENT RECOMMENDATIONS"
         ]
         cols = [c for c in preferred_cols if c in df.columns] + [c for c in df.columns if c not in preferred_cols]
         df = df[cols]
@@ -505,34 +723,26 @@ def generate_workbook(assessment, filename_prefix="audit_assessment"):
             elements.append(Paragraph(f"Assessment #{row_num + 1}", header_style))
             elements.append(HRFlowable(width="100%", thickness=1.2, color=KPMG_LIGHT_BLUE, spaceBefore=3, spaceAfter=8))
 
-            if "Control Statement" in row and pd.notna(row["Control Statement"]):
-                elements.append(Paragraph("Control Statement", statement_style))
-                elements.append(Paragraph(str(row["Control Statement"]), para_style))
+            if "CONTROL STATEMENT" in row and pd.notna(row["CONTROL STATEMENT"]):
+                elements.append(Paragraph("CONTROL STATEMENT", statement_style))
+                elements.append(Paragraph(str(row["CONTROL STATEMENT"]), para_style))
 
-            if "Evidence Type" in row and pd.notna(row["Evidence Type"]):
-                elements.append(Paragraph("Evidence Type", statement_style))
-                elements.append(Paragraph(str(row["Evidence Type"]), para_style))
+            if "ASSESSMENT RESULT" in row and pd.notna(row["ASSESSMENT RESULT"]):
+                style_to_use = compliant_style if str(row["ASSESSMENT RESULT"]).strip().lower() == "compliant" else noncompliant_style
+                elements.append(Paragraph("ASSESSMENT RESULT", statement_style))
+                elements.append(Paragraph(str(row["ASSESSMENT RESULT"]), style_to_use))
 
-            if "Assessment" in row and pd.notna(row["Assessment"]):
-                style_to_use = compliant_style if str(row["Assessment"]).strip().lower() == "compliant" else noncompliant_style
-                elements.append(Paragraph("Assessment", statement_style))
-                elements.append(Paragraph(str(row["Assessment"]), style_to_use))
+            if "LOG EVIDENCE" in row and pd.notna(row["LOG EVIDENCE"]):
+                elements.append(Paragraph("LOG EVIDENCE", statement_style))
+                elements.append(Paragraph(str(row["LOG EVIDENCE"]), para_style))
 
-            if "Log Entry" in row and pd.notna(row["Log Entry"]):
-                elements.append(Paragraph("Log Entry", statement_style))
-                elements.append(Paragraph(str(row["Log Entry"]), para_style))
+            if "ASSESSMENT RATIONALE" in row and pd.notna(row["ASSESSMENT RATIONALE"]):
+                elements.append(Paragraph("ASSESSMENT RATIONALE", statement_style))
+                elements.append(Paragraph(str(row["ASSESSMENT RATIONALE"]), para_style))
 
-            if "Rationale" in row and pd.notna(row["Rationale"]):
-                elements.append(Paragraph("Rationale", statement_style))
-                elements.append(Paragraph(str(row["Rationale"]), para_style))
-
-            if "Improvements" in row and pd.notna(row["Improvements"]):
-                elements.append(Paragraph("Improvements / Remediation", statement_style))
-                elements.append(Paragraph(str(row["Improvements"]), improvement_style))
-
-            if "Log timestamp" in row and pd.notna(row["Log timestamp"]):
-                elements.append(Paragraph("Log Timestamp", statement_style))
-                elements.append(Paragraph(str(row["Log timestamp"]), para_style))
+            if "IMPROVEMENT RECOMMENDATIONS" in row and pd.notna(row["IMPROVEMENT RECOMMENDATIONS"]):
+                elements.append(Paragraph("IMPROVEMENT RECOMMENDATIONS / Remediation", statement_style))
+                elements.append(Paragraph(str(row["IMPROVEMENT RECOMMENDATIONS"]), improvement_style))
 
             elements.append(Spacer(1, 10))
             if (row_num + 1) % 2 == 0:

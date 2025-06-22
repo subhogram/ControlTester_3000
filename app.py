@@ -3,7 +3,7 @@ import shutil
 import streamlit as st
 from utils.find_llm import _ollama_models
 from utils.file_handlers import save_and_load_files
-from utils.llm_chain import build_knowledge_base, assess_evidence_with_kb, generate_workbook, build_evidence_vectorstore
+from utils.llm_chain import build_knowledge_base, assess_evidence_with_kb,  build_evidence_vectorstore, generate_workbook
 from utils.chat import chat_with_bot
 import base64
 from langchain_community.vectorstores import FAISS
@@ -13,6 +13,7 @@ import json
 import utils.llm_chain as llm_chain
 
 import logging
+
 
 # Setup Logging
 logging.basicConfig(
@@ -100,8 +101,7 @@ selected_model = st.session_state['selected_model']
 
 
 # --- Load saved bot at app start ---
-if os.path.exists(VECTORSTORE_PATH) and not st.session_state.get('kb_ready', False):
-    
+if os.path.exists(VECTORSTORE_PATH) and not st.session_state.get('kb_ready', False):    
     st.session_state['kb_vectorstore'] = FAISS.load_local(
         VECTORSTORE_PATH,
         OllamaEmbeddings(model="llama2"),
@@ -143,15 +143,11 @@ with st.expander("1️⃣ Upload training documents", expanded=True):
     if 'kb_vectorstore' not in st.session_state:
         st.session_state['kb_vectorstore'] = None
     if 'evid_vectorstore' not in st.session_state:
-        st.session_state['evid_vectorstore'] = None
-    if 'company_kb_vectorstore' not in st.session_state:
-        st.session_state['company_kb_vectorstore'] = None
+        st.session_state['evid_vectorstore'] = None   
     if 'merged_vectorstore' not in st.session_state:
         st.session_state['merged_vectorstore'] = None
     if 'evidence_kb_ready' not in st.session_state:
         st.session_state['evidence_kb_ready'] = False
-    if 'company_files_ready' not in st.session_state:
-        st.session_state['company_files_ready'] = False
 
      # --- Dynamic Button States ---
     train_disabled = not (policy_files and len(policy_files) > 0)
@@ -248,17 +244,16 @@ with st.expander("2️⃣ Upload company resources", expanded=True):
         "Upload your company resources such as SOC 2 reports, CRI profiles, or other relevant documents. "
         "These will be used to assess your evidence against the knowledge base."
     )
+
+    if 'company_files_ready' not in st.session_state:
+        st.session_state['company_files_ready'] = False
+    if 'company_kb_vectorstore' not in st.session_state:
+        st.session_state['company_kb_vectorstore'] = None
     
     company_files = st.file_uploader(
         "Upload Company Resources (PDF, TXT, CSV, XLSX)",
         type=["pdf", "txt", "csv", "xlsx"], accept_multiple_files=True
     )
-
-    # if company_files:        
-    #     st.session_state['company_files_ready'] = True
-    #     st.success("Company resources uploaded successfully!")
-    # else:
-    #     st.session_state['company_files_ready'] = False
 
     col1, col2, _ = st.columns([2, 2, 2])
     with col1:
@@ -294,7 +289,7 @@ with st.expander("2️⃣ Upload company resources", expanded=True):
             st.experimental_rerun()
         st.success("🚮 Company resources cleared successfully!")
     
-    if st.session_state.get('company_files_ready', False):
+    if st.session_state.get('company_kb_loaded_from_saved', False):
         # if(st.session_state.get('kb_loaded_from_saved', False)):
         #     merged_vectorstore = llm_chain.merge_knowledge_bases(
         #         st.session_state['kb_vectorstore'],
@@ -302,7 +297,7 @@ with st.expander("2️⃣ Upload company resources", expanded=True):
         #     )
         #     st.session_state['merged_vectorstore'] = merged_vectorstore        
             
-        st.success("✅ Company resources uploaded and ready for assessment!")   
+        st.success("✅ Company resources ready for assessment!")   
 
 # --- Step 2: Upload Evidence Files ---
 with st.expander("3️⃣ Upload evidence files", expanded=True):   
@@ -340,12 +335,25 @@ with st.expander("3️⃣ Upload evidence files", expanded=True):
 
     if process_btn and evidence_ready:
         with st.spinner("Assessing evidence using knowledge base..."):
-            evidence_docs = save_and_load_files(evidence_files)           
-            assessment = assess_evidence_with_kb(
-                evidence_docs,
-                st.session_state['kb_vectorstore'],
-                st.session_state['company_kb_vectorstore']
-            )
+            assessment = None
+            ASSESSMENT_PATH = "saved_assessment.json"
+            if os.path.exists(ASSESSMENT_PATH):
+                    with open(ASSESSMENT_PATH, "r") as f:
+                        assessment = json.load(f)
+
+            
+            # Save assessment to local file            
+            if assessment is None:
+                evidence_docs = save_and_load_files(evidence_files) 
+                assessment = assess_evidence_with_kb(
+                    evidence_docs,
+                    st.session_state['kb_vectorstore'],
+                    st.session_state['company_kb_vectorstore']
+                )
+                with open(ASSESSMENT_PATH, "w") as f:
+                    json.dump(assessment, f, indent=2)
+                            
+                
             workbook_path = generate_workbook(assessment)
             st.session_state['assessment'] = assessment
             st.session_state['workbook_path'] = workbook_path
@@ -358,8 +366,12 @@ with st.expander("3️⃣ Upload evidence files", expanded=True):
 if st.session_state.get('assessment_done'):
     with st.expander("3️⃣ Download audit workbook", expanded=True):
         st.subheader("Download Cyber Risk Audit Workbook")
-        with open(st.session_state['workbook_path'], "rb") as f:
-            st.download_button("⬇️ Download audit workbook", f, file_name="CyberRisk_Audit_Workbook.pdf")       
+        workbook_path = st.session_state.get('workbook_path')
+        if workbook_path is not None and os.path.exists(workbook_path):
+            with open(workbook_path, "rb") as f:
+                st.download_button("⬇️ Download audit workbook", f, file_name="CyberRisk_Audit_Workbook.pdf")       
+        else:
+            st.warning("No audit workbook available for download. Please process the documents first.")
 else:
     with st.expander("3️⃣ Download audit workbook", expanded=False):
         st.info("Process documents first for report generation.")
