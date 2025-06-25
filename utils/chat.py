@@ -127,7 +127,7 @@ def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vecto
                     --- COMPANY CYBERSECURITY POLICIES ---
                     {company_kb_context}
 
-                    --- EVIDENCE (LOGS, FILES, OBSERVATIONS) ---
+                    --- EVIDENCE (LOGS/ FILES for OBSERVATIONS) ---
                     {evid_context}
 
                     --- USER QUESTION OR TASK ---
@@ -136,11 +136,11 @@ def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vecto
                     Instructions:
                     - Answer any question regarding cybersecurity, company policy, security audit, analysis of logs, compliance, or best practices, using the most relevant context above.
                     - If asked to perform an analysis, provide a thorough, step-by-step evaluation.
-                    - If asked for a report or compliance summary, format your answer as a clear, well-structured analysis that can be directly used for PDF generation.
+                    - If asked for a report or compliance summary, format your answer as a clear, well-structured analysis that can be directly used for generation.
                     - Always reference the context you used in your answer.
                     - If information is missing, clearly state the assumptions or request clarification.
 
-                    Your output should be to the point, detailed, actionable, tabular (if doing comparisions) and ready for inclusion in a professional PDF report.
+                    Your output should be to the point, detailed, actionable, tabular (if doing comparisions) and ready for inclusion in a professional report.
                     """
         )
 

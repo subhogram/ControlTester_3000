@@ -10,10 +10,8 @@ def _ollama_models():
             models_data = response.json()
             model_names = [model['name'] for model in models_data.get('models', [])]
             model_names = [name for name in model_names if not "embed" in name]
-            return sorted(model_names) if model_names else ["deepseek-r1"]
+            return sorted(model_names)
         else:
-            st.warning("⚠️ Could not connect to Ollama. Using default model.")
-            return ["deepseek-r1"]
+            st.warning("⚠️ Could not connect to Ollama.")
     except Exception as e:
-        st.warning(f"⚠️ Error connecting to Ollama: {str(e)}. Using default model.")
-        return ["deepseek-r1"]
+        st.warning(f"⚠️ Error connecting to Ollama: {str(e)}.")

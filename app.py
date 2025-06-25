@@ -3,7 +3,8 @@ import shutil
 import streamlit as st
 from utils.find_llm import _ollama_models
 from utils.file_handlers import save_and_load_files
-from utils.llm_chain import build_knowledge_base, assess_evidence_with_kb,  build_evidence_vectorstore, generate_workbook
+from utils.llm_chain import build_knowledge_base, assess_evidence_with_kb,  build_evidence_vectorstore
+from utils.pdf_generator import generate_workbook
 from utils.chat import chat_with_bot
 import base64
 from langchain_community.vectorstores import FAISS
@@ -104,7 +105,7 @@ selected_model = st.session_state['selected_model']
 if os.path.exists(VECTORSTORE_PATH) and not st.session_state.get('kb_ready', False):    
     st.session_state['kb_vectorstore'] = FAISS.load_local(
         VECTORSTORE_PATH,
-        OllamaEmbeddings(model="llama2"),
+        OllamaEmbeddings(model="bge-m3:latest"),
         allow_dangerous_deserialization=True
     )
     st.session_state['kb_ready'] = True
@@ -114,7 +115,7 @@ if os.path.exists(VECTORSTORE_PATH) and not st.session_state.get('kb_ready', Fal
 if os.path.exists(COMPANY_VECTORSTORE_PATH) and not st.session_state.get('company_files_ready', False):
     st.session_state['company_kb_vectorstore'] = FAISS.load_local(
         COMPANY_VECTORSTORE_PATH,
-        OllamaEmbeddings(model="llama2"),
+        OllamaEmbeddings(model="bge-m3:latest"),
         allow_dangerous_deserialization=True
     )
     st.session_state['company_files_ready'] = True  
@@ -344,12 +345,15 @@ with st.expander("3️⃣ Upload evidence files", expanded=True):
             
             # Save assessment to local file            
             if assessment is None:
-                evidence_docs = save_and_load_files(evidence_files) 
-                assessment = assess_evidence_with_kb(
+                evidence_docs = save_and_load_files(evidence_files)
+                llm_chain.initialize(selected_model) 
+                assessment = llm_chain.assess_evidence_with_kb(
                     evidence_docs,
                     st.session_state['kb_vectorstore'],
                     st.session_state['company_kb_vectorstore']
                 )
+                summary = llm_chain.generate_executive_summary(assessment)
+                assessment.append(summary)
                 with open(ASSESSMENT_PATH, "w") as f:
                     json.dump(assessment, f, indent=2)
                             
@@ -359,7 +363,7 @@ with st.expander("3️⃣ Upload evidence files", expanded=True):
             st.session_state['workbook_path'] = workbook_path
             st.session_state['assessment_done'] = True
            
-        st.success("✅ Evidence processed! Audit workbook ready.")
+        st.toast("✅ Evidence processed! Audit workbook ready.")
         st.info("You can now download the audit workbook and chat with the assistant.")  
 
 # --- Step 3: Download ---
