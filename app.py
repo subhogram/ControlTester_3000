@@ -3,13 +3,12 @@ import shutil
 import streamlit as st
 from utils.find_llm import _ollama_models
 from utils.file_handlers import save_and_load_files
-from utils.llm_chain import build_knowledge_base, assess_evidence_with_kb,  build_evidence_vectorstore
+from utils.llm_chain import build_evidence_vectorstore
 from utils.pdf_generator import generate_workbook
 from utils.chat import chat_with_bot
 import base64
 from langchain_community.vectorstores import FAISS
 from langchain_ollama import OllamaEmbeddings
-import requests
 import json
 import utils.llm_chain as llm_chain
 

@@ -1,38 +1,20 @@
-import os
 import time
-import tempfile
-import pandas as pd
 from utils.assessment_schema import Assessment
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_ollama import OllamaEmbeddings, OllamaLLM, ChatOllama
-from langchain.chains import LLMChain
-from ollama import chat, ChatResponse
-from reportlab.lib.pagesizes import A4
-from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, PageBreak, HRFlowable, Table, TableStyle)
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from langchain_ollama import OllamaEmbeddings, OllamaLLM
 import logging
 from langchain.schema import Document
 from langchain.prompts import PromptTemplate
-import threading
-from typing import List, Dict, Any, Tuple, Optional
-from dataclasses import dataclass
-from queue import Queue
 import re
 from langchain.output_parsers import PydanticOutputParser
 from langchain.prompts import PromptTemplate
-from langchain_community.llms import Ollama  # Or your wrapper for ChatOllama
 from pydantic import ValidationError
 
-from itertools import islice
 
 import warnings
 import json
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak, Frame
-import datetime
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 
@@ -55,10 +37,6 @@ logging.basicConfig(
     handlers=[logging.StreamHandler()]
 )
 logger = logging.getLogger(__name__)
-
-
-
-
 
 # LangChain components
 text_splitter = RecursiveCharacterTextSplitter(
@@ -361,17 +339,18 @@ def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, c
     try:
         parser = PydanticOutputParser(pydantic_object=Assessment)        
 
-        base_contexts = kb_vectorstore.similarity_search(evid_text, k=3)
+        base_contexts = kb_vectorstore.similarity_search(evid_text, k=5)
         knowledge_base_context = "\n\n".join([getattr(c, "page_content", str(c)) for c in base_contexts])
 
-        company_contexts = company_kb_vectorstore.similarity_search(evid_text, k=3)
+        company_contexts = company_kb_vectorstore.similarity_search(evid_text, k=5)
         company_knowledge_base_context = "\n\n".join([getattr(c, "page_content", str(c)) for c in company_contexts])
 
         prompt = PromptTemplate(
-            template="""
+            template = """
             You are a cybersecurity audit analyst responsible for creating audit workbooks and performing evidence-based risk and control assessments.
 
             You have access to the following context sources:
+
             ### GLOBAL RISK AND CONTROL STANDARDS
             {knowledge_base_context}
 
@@ -379,7 +358,8 @@ def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, c
             {company_knowledge_base_context}
 
             You must assess the following evidence snippet:
-            ### LOG EVIDENCE AND SUPPORTING DOCUMENTATION
+
+            ### EVIDENCE SNIPPET
             {evid_text}
 
             ---
@@ -399,9 +379,9 @@ def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, c
             - Highlight any missing or insufficient documentation
 
             ### 3. LOG ANALYSIS FOCUS
-            - Identify relevant control statements [you must identify the relevant control statement from policy documents before proceeding with analysis]
-            - Evaluate if relavant policies are being enforced effectively
-            - Match log entries to expected behaviors from standards            
+            - Identify relevant control testing statements from the COMPANY-SPECIFIC RISK AND CONTROL STANDARDS (CRI PROFILE)
+            - Evaluate whether the relevant policies are being enforced effectively
+            - Match log entries to expected behaviors based on standards
             - Determine compliance status and associated risk
             - Provide a clear rationale and suggest improvements
 
@@ -422,52 +402,45 @@ def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, c
             - Document limitations if evidence is incomplete
             - Suggest additional evidence or compensating controls
 
-            ### 7. ASSESSMENT CONTENT                    
-                    ** 1. CONTROL STATEMENT
-                            -Must extract the exact comprehensive control statement in quotes from the CRI profile that is being tested.
+            ---
 
-                    ** 2. ASSESSMENT RESULT
-                            - Compliance Status: COMPLIANT / NON-COMPLIANT / PARTIALLY COMPLIANT.
-                            - Risk Level: CRITICAL / HIGH / MEDIUM / LOW.
+            ## OUTPUT FORMAT (REQUIRED)
 
-                    ** 3. LOG EVIDENCE
-                            - Source File: [Specify the exact log file name or evidence source]
-                            - Relevant Log Entries: [Quote exact lines from logs with timestamps and details]
+            Return your answer strictly as a JSON object matching the following schema:
 
-                    ** 4. ASSESSMENT RATIONALE
-                            For NON-COMPLIANT controls:
-                                - Why it failed: [Specific explanation based on log evidence]
-                                - Gap analysis: [What should happen vs. what actually happened]
-                                - Risk Impact: [Security risk or business impact]
-
-                            For COMPLIANT controls:
-                                - Evidence of compliance: [How logs demonstrate control effectiveness]
-                                - Effectiveness assessment: [Quality of implementation]
-
-                    ** 5. IMPROVEMENT RECOMMENDATIONS
-                            Mandatory Improvements (for non-compliant):
-                                - Specific steps to achieve compliance [Quote from the relevant sources like CRI profile, company policy or other global policies]
-                                - Timeline recommendations
-                                - Responsible parties
-
-                            Enhancement Opportunities (even if compliant):
-                                - How to strengthen beyond company policy
-                                - Global security best practices to adopt. Quote the exact policy name and the policy statement / statements.
-                                - Technology or process improvements
-
-            ---          
-            
-            ### IMPORTANT:
-            - Generate response must be returned as JSON.
-            - Do not include explanations, markdown, or commentary.
-            - If any field is unknown, use empty string `""` or empty list `[]`, but include the key.
-            - Do not include your thought statements.
-
-            ### Perform an exhaustive and comprehensive analysis
-
-            Respond only with a JSON object using the following schema:
             {format_instructions}
 
+            ### FIELD-BY-FIELD OUTPUT EXPECTATIONS
+
+            **1. CONTROL STATEMENT**
+            - Extract the exact control statement (verbatim) from the COMPANY-SPECIFIC RISK AND CONTROL STANDARDS (CRI PROFILE) that is most relevant to the evidence.
+
+            **2. ASSESSMENT RESULT**
+            - Compliance Status: One of COMPLIANT, NON-COMPLIANT, PARTIALLY COMPLIANT
+            - Risk Level: One of CRITICAL, HIGH, MEDIUM, LOW
+
+            **3. LOG EVIDENCE**
+            - Source File: Name of the log file
+            - Relevant Log Entries: Copy log lines (with timestamps) that support the assessment
+
+            **4. ASSESSMENT RATIONALE**
+            - For NON-COMPLIANT: Provide 'Why it failed', 'Gap analysis', and 'Impact'
+            - For COMPLIANT: Provide 'Evidence of compliance' and 'Effectiveness assessment'
+
+            **5. IMPROVEMENT RECOMMENDATIONS**
+            - Mandatory Improvements (if non-compliant): List of corrective actions with references and timelines
+            - Enhancement Opportunities: Optional improvements even if compliant, referencing global best practices
+
+            ---
+
+            ### IMPORTANT:
+
+            - Respond only with a **valid JSON object**, matching the schema exactly.
+            - Do **not** include explanations, markdown, or commentary.
+            - Use `""` for any missing string, and `[]` for any missing list values.
+            - Ensure the object can be parsed directly into the Pydantic model without transformation.
+
+            ### Perform an exhaustive and comprehensive assessment based on the above.
             """,
             input_variables=["knowledge_base_context", "company_knowledge_base_context", "evid_text"],
             partial_variables={"format_instructions": parser.get_format_instructions()}
@@ -483,7 +456,7 @@ def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, c
         parsed = parser.parse(response)
         
         return {
-            "assessment": parsed
+            "assessment": parsed.json()
         }
     except ValidationError as ve:
         logging.error(f"Validation failed for chunk {chunk_index} (doc {doc_index}): {ve}")

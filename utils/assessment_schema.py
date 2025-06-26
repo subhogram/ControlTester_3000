@@ -6,11 +6,11 @@ class AssessmentResult(BaseModel):
     Risk_Level: str = Field(..., description="CRITICAL | HIGH | MEDIUM | LOW")
 
 class AssessmentRationale(BaseModel):
-    Why_it_failed : str
-    Gap_analysis : str
-    Impact : str
-    Evidence_of_compliance : str
-    Effectiveness_assessment : str
+    Why_it_failed: str
+    Gap_analysis: str
+    Impact: str
+    Evidence_of_compliance: str
+    Effectiveness_assessment: str
 
 class LogEvidence(BaseModel):
     Source_File: str
@@ -20,10 +20,9 @@ class ImprovementRecommendations(BaseModel):
     Mandatory_Improvements: List[str]
     Enhancement_Opportunities: List[str]
 
-
 class Assessment(BaseModel):
-    control_statement : str
-    assessment_result : List[AssessmentResult]
-    assessment_rationale : List[AssessmentRationale]
-    log_evidence : List[LogEvidence]
-    improvement_recommendation : List[ImprovementRecommendations]
+    control_statement: str
+    assessment_result: AssessmentResult
+    assessment_rationale: AssessmentRationale
+    log_evidence: LogEvidence
+    improvement_recommendation: ImprovementRecommendations
