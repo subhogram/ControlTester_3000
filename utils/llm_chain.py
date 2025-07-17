@@ -288,10 +288,10 @@ def build_evidence_vectorstore(evidence_docs):
             meta = getattr(doc, "metadata", {}) if hasattr(doc, "metadata") else {}
             for split in splits:
                 texts.append(split)
-                metadatas.append(meta)
+                metadatas.append(meta)        
         except Exception as e:
             logger.error(f"Error uploading evidence document {i}: {e}")
-
+    
     if not texts:
         raise ValueError("No valid content found in evidence documents.")
 
@@ -311,6 +311,8 @@ def build_evidence_vectorstore(evidence_docs):
 # ----------------- ASSESS EVIDENCE WITH KNOWLEDGE BASE -----------------
 import re
 import json
+import io
+from PIL import Image, ImageDraw, ImageFont
 
 def extract_and_validate_json(text):
     """
@@ -469,10 +471,38 @@ def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, c
             "assessment": f"Error: {e}"
         }
 
+def render_text_to_image(evidence_docs, font_size=14, width=1200, bg_color="white", text_color="black"):
+
+        
+
+        # Prepare the text content for the screenshot
+        evidence_docs_content = "\n\n".join(
+            f"Doc {i}:\n{getattr(doc, 'page_content', str(doc))[:2000]}"  # Limit to 2000 chars per doc for brevity
+            for i, doc in enumerate(evidence_docs)
+        ) 
+
+        # Use a monospace font for clarity
+        try:
+            font = ImageFont.truetype("DejaVuSansMono.ttf", font_size)
+        except Exception:
+            font = ImageFont.load_default()
+        # Estimate height
+        lines = evidence_docs_content.splitlines()
+        # Use getbbox to determine line height (compatible with Pillow >= 10)
+        bbox = font.getbbox("A")
+        line_height = (bbox[3] - bbox[1]) + 2
+        img_height = line_height * (len(lines) + 2)
+        img = Image.new("RGB", (width, img_height), color=bg_color)
+        draw = ImageDraw.Draw(img)
+        y = 5
+        for line in lines:
+            draw.text((5, y), line, font=font, fill=text_color)
+            y += line_height
+        return img
 
 def assess_evidence_with_kb(evidence_docs, kb_vectorstore, company_kb_vectorstore, max_workers=4):
     start = time.time()
-    evid_texts, chunk_origin = [], []
+    evid_texts, chunk_origin = [], []    
 
     for i, doc in enumerate(evidence_docs):
         try:

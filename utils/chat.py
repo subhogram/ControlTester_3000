@@ -57,7 +57,7 @@ def bot_chat_box(message):
         unsafe_allow_html=True,
     )
 
-def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vectorstore, merged_vectorstore, selected_model):    
+def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vectorstore, selected_model):    
     st.markdown(
         f"""
         <style>
@@ -106,8 +106,13 @@ def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vecto
         company_contexts = company_kb_vectorstore.similarity_search(user_input, k=3)
         company_kb_context = "\n\n".join([c.page_content for c in company_contexts])
 
-        evid_contexts = evid_vectorstore.similarity_search(user_input, k=3)
-        evid_context = "\n\n".join([c.page_content for c in evid_contexts])
+        if evid_vectorstore is not  None:
+            evid_contexts = evid_vectorstore.similarity_search(user_input, k=3)
+            evid_context = "\n\n".join([c.page_content for c in evid_contexts])
+        else:
+            evid_context = None                
+       
+        
 
         logger.info(f"Using model: {selected_model} for chat response")  
 
@@ -121,26 +126,24 @@ def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vecto
             template="""
                     You are a highly capable cybersecurity assistant. You have access to the following contextual sources:
 
-                    --- BASE CYBERSECURITY KNOWLEDGE ---
-                    {kb_context}
+                    You have a base level understanding of cybersecurity risk and control policies from : {kb_context}
 
-                    --- COMPANY CYBERSECURITY POLICIES ---
-                    {company_kb_context}
+                    You have an understanding of company-specific policies, procedures, and guidelines from : {company_kb_context}
 
-                    --- EVIDENCE (LOGS/ FILES for OBSERVATIONS) ---
-                    {evid_context}
+                    User may upload some files and you have access to the following evidence or uploaded files context : {evid_context}                   
 
                     --- USER QUESTION OR TASK ---
                     {user_input}
 
                     Instructions:
-                    - Answer any question regarding cybersecurity, company policy, security audit, analysis of logs, compliance, or best practices, using the most relevant context above.
+                    - Answer any question regarding cybersecurity, company policy, security audit, analysis of logs, compliance, or best practices, using the most relevant source above.                   
                     - If asked to perform an analysis, provide a thorough, step-by-step evaluation.
                     - If asked for a report or compliance summary, format your answer as a clear, well-structured analysis that can be directly used for generation.
                     - Always reference the context you used in your answer.
                     - If information is missing, clearly state the assumptions or request clarification.
+                    - For all other cases, including but not limited to recommendations, factual queries and more, you provide insightful and in-depth responses. Your goal is to leave the user feeling like no stone has been left unturned. Responses that are too short are lazy. DO NOT be lazy. Be thoughtful.
 
-                    Your output should be to the point, detailed, actionable, tabular (if doing comparisions) and ready for inclusion in a professional report.
+                    Your output should be comprehensive, detailed, actionable, tabular (if doing comparisions).
                     """
         )
 

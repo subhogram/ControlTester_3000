@@ -17,17 +17,20 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, 
-    PageBreak, KeepTogether
+    PageBreak, KeepTogether, Image
 )
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
+from PIL import Image as PILImage
+import io
 
 
-def generate_workbook(json_data, output_filename="security_assessment_report.pdf"):
+def generate_workbook(json_data, evidence_docs_screenshot=None, output_filename="security_assessment_report.pdf"):
     """
     Generate a visually pleasing PDF report from JSON security assessment data.
     
     Args:
         json_data: List of dictionaries containing assessment data
+        evidence_docs_screenshot: PIL Image object to be included at the end of the report (optional)
         output_filename: Name of the output PDF file
         
     Returns:
@@ -35,19 +38,20 @@ def generate_workbook(json_data, output_filename="security_assessment_report.pdf
     """
     try:
         generator = SecurityAssessmentReportGenerator()
-        result = generator.generate_report(json_data, output_filename)
+        result = generator.generate_report(json_data, output_filename, evidence_docs_screenshot)
         return output_filename if result['success'] else None
     except Exception as e:
         print(f"PDF generation failed: {str(e)}")
         return None
 
 
-def generate_workbook_detailed(json_data, output_filename="security_assessment_report.pdf"):
+def generate_workbook_detailed(json_data, evidence_docs_screenshot=None, output_filename="security_assessment_report.pdf"):
     """
     Generate a PDF report and return detailed results including statistics and errors.
     
     Args:
         json_data: List of dictionaries containing assessment data
+        evidence_docs_screenshot: PIL Image object to be included at the end of the report (optional)
         output_filename: Name of the output PDF file
         
     Returns:
@@ -55,7 +59,7 @@ def generate_workbook_detailed(json_data, output_filename="security_assessment_r
     """
     try:
         generator = SecurityAssessmentReportGenerator()
-        return generator.generate_report(json_data, output_filename)
+        return generator.generate_report(json_data, output_filename, evidence_docs_screenshot)
     except Exception as e:
         return {
             'success': False,
@@ -608,7 +612,61 @@ class SecurityAssessmentReportGenerator:
         
         canvas.restoreState()
 
-    def generate_report(self, json_data: List[Dict], output_filename: str) -> Dict:
+    def _create_evidence_screenshot_section(self, story: List, evidence_screenshot):
+        """Create evidence documentation screenshot section."""
+        story.append(Paragraph("Evidence Documentation", self.heading_style))
+        story.append(Spacer(1, 0.2*inch))
+        
+        try:
+            # Convert PIL image to bytes for ReportLab
+            img_buffer = io.BytesIO()
+            
+            # Ensure image is in RGB mode for PDF compatibility
+            if evidence_screenshot.mode != 'RGB':
+                evidence_screenshot = evidence_screenshot.convert('RGB')
+            
+            # Save image to buffer
+            evidence_screenshot.save(img_buffer, format='JPEG', quality=85)
+            img_buffer.seek(0)
+            
+            # Get image dimensions
+            img_width, img_height = evidence_screenshot.size
+            
+            # Calculate scaling to fit within page margins
+            page_width = letter[0] - 144  # Account for margins (72 points each side)
+            page_height = letter[1] - 200  # Account for margins and header/footer space
+            
+            # Calculate scale factor to fit image on page
+            width_scale = page_width / img_width
+            height_scale = page_height / img_height
+            scale_factor = min(width_scale, height_scale, 1.0)  # Don't scale up
+            
+            # Calculate final dimensions
+            final_width = img_width * scale_factor
+            final_height = img_height * scale_factor
+            
+            # Create ReportLab Image object
+            rl_image = Image(img_buffer, width=final_width, height=final_height)
+            
+            # Add image description
+            story.append(Paragraph("Supporting evidence documentation screenshot:", self.body_style))
+            story.append(Spacer(1, 0.1*inch))
+            
+            # Add the image
+            story.append(rl_image)
+            story.append(Spacer(1, 0.2*inch))
+            
+            # Add image metadata
+            metadata_text = f"Image dimensions: {img_width} x {img_height} pixels (scaled to {int(final_width)} x {int(final_height)} for display)"
+            story.append(Paragraph(metadata_text, self.small_text_style))
+            
+        except Exception as e:
+            # Fallback if image processing fails
+            error_text = f"Error processing evidence screenshot: {str(e)}"
+            story.append(Paragraph(error_text, self.body_style))
+            story.append(Spacer(1, 0.1*inch))
+
+    def generate_report(self, json_data: List[Dict], output_filename: str, evidence_docs_screenshot=None) -> Dict:
         """Generate the complete PDF report."""
         try:
             # Input validation
@@ -659,6 +717,10 @@ class SecurityAssessmentReportGenerator:
             if assessments:
                 self._create_assessment_details(story, assessments)
             
+            # Add evidence screenshot if provided
+            if evidence_docs_screenshot:
+                self._create_evidence_screenshot_section(story, evidence_docs_screenshot)
+            
             # Build the PDF with header/footer callback
             doc.build(story, onFirstPage=self._create_header_footer, 
                      onLaterPages=self._create_header_footer)
@@ -669,6 +731,7 @@ class SecurityAssessmentReportGenerator:
                 'output_file': output_filename,
                 'total_assessments': len(assessments),
                 'executive_summary_included': bool(executive_summary),
+                'evidence_screenshot_included': bool(evidence_docs_screenshot),
                 'file_size_bytes': os.path.getsize(output_filename) if os.path.exists(output_filename) else 0
             }
             

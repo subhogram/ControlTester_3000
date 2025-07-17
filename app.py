@@ -52,7 +52,7 @@ st.markdown(
 )
 
 st.title("🤖 Risk Control Audit Assistant")
-st.markdown("Welcome to your Risk Control Assistant. Start by uploading your policies and evidence files below.")
+st.markdown("Welcome to your Risk Control Assistant. Start by uploading your policies and files below.")
 
 # Check if Ollama is running and get available models
 available_models = _ollama_models()
@@ -242,7 +242,7 @@ with st.expander("1️⃣ Upload training documents", expanded=True):
 with st.expander("2️⃣ Upload company resources", expanded=True):
     st.markdown(
         "Upload your company resources such as SOC 2 reports, CRI profiles, or other relevant documents. "
-        "These will be used to assess your evidence against the knowledge base."
+        "These will be used to assess your files against the knowledge base."
     )
 
     if 'company_files_ready' not in st.session_state:
@@ -300,49 +300,47 @@ with st.expander("2️⃣ Upload company resources", expanded=True):
         st.success("✅ Company resources ready for assessment!")   
 
 # --- Step 2: Upload Evidence Files ---
-with st.expander("3️⃣ Upload evidence files", expanded=True):   
+with st.expander("3️⃣ Upload files for assessment", expanded=True):   
     evidence_files = st.file_uploader(
-        "Upload Evidence (Logs, Configs, Screenshots - PDF, TXT, CSV, XLSX, JPEG)",
+        "Upload files (Logs, Configs, Screenshots - PDF, TXT, CSV, XLSX, JPEG)",
         type=["pdf", "txt", "csv", "xlsx", "jpeg", "jpg"], accept_multiple_files=True
     )
 
     evidence_ready = st.session_state.get('kb_ready') and (evidence_files is not None and len(evidence_files) > 0)
+    download_report = st.session_state.get('assessment_done') and  st.session_state.get('workbook_path')
 
     col1, col2, _ = st.columns([2, 2, 2])
     with col1:
         upload_evidence_btn = st.button(
-            "📤 Upload Evidence",
+            "📤 Upload Files",
             disabled=not (evidence_files and len(evidence_files) > 0),
-            help="Upload evidence files to assess against the knowledge base."
+            help="Upload files to assess."
         )
     with col2:
         process_btn = st.button(
-            "🧮 Process evidence & generate workbook",
+            "🧮 Audit & generate workbook",
             disabled=not evidence_ready,  # Initially disabled until evidence is uploaded
-            help="Assess uploaded evidence using the knowledge base and generate an audit workbook."
+            help="Assess uploaded files using the knowledge base and generate an audit workbook."
         )
-    
+    evidence_docs_screenshot = None
     if upload_evidence_btn:
-        with st.spinner("Processing evidence..."):
+        with st.spinner("Processing files..."):
             evidence_docs = save_and_load_files(evidence_files)
+            evidence_docs_screenshot = llm_chain.render_text_to_image(evidence_files)
             evid_vectorstore = build_evidence_vectorstore(evidence_docs)
             st.session_state['evid_vectorstore'] = evid_vectorstore
             st.session_state['evidence_kb_ready'] = True
-            st.toast("✅ Evidence Uploaded Successfully!")
-
-    if st.session_state.get('evidence_kb_ready', True):
-         st.success("✅ Evidence Uploaded Successfully")
+            st.toast("✅ Files Uploaded Successfully!")
+            st.success("✅ Files Uploaded Successfully")
 
     if process_btn and evidence_ready:
-        with st.spinner("Assessing evidence using knowledge base..."):
-            assessment = None
+        with st.spinner("Assessing files using knowledge base..."):
+            assessment = None           
             ASSESSMENT_PATH = "saved_assessment.json"
-            if os.path.exists(ASSESSMENT_PATH):
-                    with open(ASSESSMENT_PATH, "r") as f:
-                        assessment = json.load(f)
-
-            
-            # Save assessment to local file            
+            # if os.path.exists(ASSESSMENT_PATH):
+            #         with open(ASSESSMENT_PATH, "r") as f:
+            #             assessment = json.load(f)
+                  
             if assessment is None:
                 evidence_docs = save_and_load_files(evidence_files)
                 llm_chain.initialize(selected_model) 
@@ -351,18 +349,21 @@ with st.expander("3️⃣ Upload evidence files", expanded=True):
                     st.session_state['kb_vectorstore'],
                     st.session_state['company_kb_vectorstore']
                 )
+                # Render to image and save to a variable (PIL Image object)
+                
+
                 summary = llm_chain.generate_executive_summary(assessment)
                 assessment.append(summary)
                 with open(ASSESSMENT_PATH, "w") as f:
                     json.dump(assessment, f, indent=2)
-                            
+                                       
                 
-            workbook_path = generate_workbook(assessment)
+            workbook_path = generate_workbook(assessment, evidence_docs_screenshot)
             st.session_state['assessment'] = assessment
             st.session_state['workbook_path'] = workbook_path
             st.session_state['assessment_done'] = True
            
-        st.toast("✅ Evidence processed! Audit workbook ready.")
+        st.toast("✅ Files processed! Audit workbook ready.")
         st.info("You can now download the audit workbook and chat with the assistant.")  
 
 # --- Step 3: Download ---
@@ -387,8 +388,8 @@ with st.expander("4️⃣ Chat with the agent", expanded=True):
         st.toast(f"Currently selected model: **{selected_model}**") 
 
     st.subheader("Chat with the Audit Bot")
-    chat_with_bot(st.session_state['kb_vectorstore'], st.session_state['company_kb_vectorstore'], st.session_state['assessment'], st.session_state['evid_vectorstore'], st.session_state['merged_vectorstore'], st.session_state['selected_model'])
+    chat_with_bot(st.session_state['kb_vectorstore'], st.session_state['company_kb_vectorstore'], st.session_state['assessment'], st.session_state['evid_vectorstore'], st.session_state['selected_model'])
     if st.session_state.get('assessment_done') or st.session_state.get('kb_ready') or st.session_state.get('company_files_ready'):
-        st.info("You can now ask questions about your audit and evidence. The bot will assist you based on the knowledge base and processed evidence.")
+        st.info("You can now ask questions about your audit and files. The bot will assist you based on the knowledge base and processed files.")
     else:
-        st.warning("Please upload policies and evidence files, then train the bot to start chatting.")
+        st.warning("Please upload policies and files, then train the bot to start chatting.")
