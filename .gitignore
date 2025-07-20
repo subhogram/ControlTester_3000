@@ -1,3 +1,8 @@
 saved_company_vectorstore/
 saved_kb_vectorstore/
 THINGS_TODO.txt
+.venv/
+.streamlit/
+utils/__pycache__/
+audit_pipeline.log
+
