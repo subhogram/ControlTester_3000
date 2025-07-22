@@ -4,6 +4,7 @@ from langchain_ollama import OllamaLLM
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import logging
+import os
 
 # Setup Logging
 logging.basicConfig(
@@ -99,7 +100,8 @@ def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vecto
             st.experimental_rerun()
 
     if send_clicked and user_input.strip() != "":
-        llm=OllamaLLM(model=selected_model)
+        ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+        llm = OllamaLLM(model=selected_model, base_url=ollama_base_url)
         kb_contexts = kb_vectorstore.similarity_search(user_input, k=3)
         kb_context = "\n\n".join([c.page_content for c in kb_contexts])
 

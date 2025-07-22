@@ -5,4 +5,6 @@ THINGS_TODO.txt
 .streamlit/
 utils/__pycache__/
 audit_pipeline.log
-
+frontend/
+backend/
+.vscode/

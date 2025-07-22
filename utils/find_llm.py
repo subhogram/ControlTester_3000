@@ -1,6 +1,6 @@
 import streamlit as st
 import requests
-
+   
 # use Cache for 60 seconds to avoid frequent API calls
 def _ollama_models():
     """Fetch available Ollama models from the local Ollama instance"""
