@@ -24,6 +24,7 @@ from PIL import Image as PILImage
 import io
 
 
+
 def generate_workbook(json_data, evidence_docs_screenshot=None, output_filename="security_assessment_report.pdf"):
     """
     Generate a visually pleasing PDF report from JSON security assessment data.

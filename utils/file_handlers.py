@@ -2,6 +2,9 @@ import os
 import tempfile
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_unstructured import UnstructuredLoader
+from fastapi import APIRouter, UploadFile, File
+from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 
 def save_temp_file(file):
     suffix = file.name.split(".")[-1]

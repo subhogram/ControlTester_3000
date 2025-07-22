@@ -11,7 +11,7 @@ import re
 from langchain.output_parsers import PydanticOutputParser
 from langchain.prompts import PromptTemplate
 from pydantic import ValidationError
-
+import os
 
 import warnings
 import json
@@ -19,7 +19,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 
 embeddings = OllamaEmbeddings(model="bge-m3:latest")  # Ensure faiss-gpu is installed for GPU usage
-llm = OllamaLLM(model="llama3", temperature = 0)
+llm = OllamaLLM(model="bge-m3:latest", temperature = 0)
 
 def initialize(selected_model):
     """
