@@ -341,7 +341,7 @@ with st.expander("3️⃣ Upload files for assessment", expanded=True):
     if process_btn and evidence_ready:
         with st.spinner("Assessing files using knowledge base..."):
             assessment = None           
-            ASSESSMENT_PATH = "saved_assessment.json"
+            #ASSESSMENT_PATH = "saved_assessment.json"
             # if os.path.exists(ASSESSMENT_PATH):
             #         with open(ASSESSMENT_PATH, "r") as f:
             #             assessment = json.load(f)
@@ -359,8 +359,8 @@ with st.expander("3️⃣ Upload files for assessment", expanded=True):
 
                 summary = llm_chain.generate_executive_summary(assessment)
                 assessment.append(summary)
-                with open(ASSESSMENT_PATH, "w") as f:
-                    json.dump(assessment, f, indent=2)
+                # with open(ASSESSMENT_PATH, "w") as f:
+                #     json.dump(assessment, f, indent=2)
                                        
                 
             workbook_path = generate_workbook(assessment, evidence_docs_screenshot)
