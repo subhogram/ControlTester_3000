@@ -5,7 +5,7 @@ import requests
 def _ollama_models():
     """Fetch available Ollama models from the local Ollama instance"""
     try:
-        response = requests.get("http://localhost:11434/api/tags", timeout=5)
+        response = requests.get("http://ollama:11434/api/tags", timeout=5)
         if response.status_code == 200:
             models_data = response.json()
             model_names = [model['name'] for model in models_data.get('models', [])]

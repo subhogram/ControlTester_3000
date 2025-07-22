@@ -13,13 +13,16 @@ from langchain.prompts import PromptTemplate
 from pydantic import ValidationError
 import os
 
+# Get Ollama base URL from environment variable
+OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+
 import warnings
 import json
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 
-embeddings = OllamaEmbeddings(model="bge-m3:latest")  # Ensure faiss-gpu is installed for GPU usage
-llm = OllamaLLM(model="bge-m3:latest", temperature = 0)
+embeddings = OllamaEmbeddings(model="bge-m3:latest",base_url=OLLAMA_BASE_URL)  # Ensure faiss-gpu is installed for GPU usage
+llm = OllamaLLM(model="bge-m3:latest", base_url=OLLAMA_BASE_URL, temperature = 0)
 
 def initialize(selected_model):
     """
@@ -28,7 +31,7 @@ def initialize(selected_model):
     """
     
     global llm
-    llm = OllamaLLM(model=selected_model)
+    llm = OllamaLLM(model=selected_model, base_url=OLLAMA_BASE_URL)
     
 # Setup Logging
 logging.basicConfig(

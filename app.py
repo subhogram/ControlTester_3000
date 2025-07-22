@@ -378,7 +378,13 @@ if st.session_state.get('assessment_done'):
         workbook_path = st.session_state.get('workbook_path')
         if workbook_path is not None and os.path.exists(workbook_path):
             with open(workbook_path, "rb") as f:
-                st.download_button("⬇️ Download audit workbook", f, file_name="CyberRisk_Audit_Workbook.pdf")       
+                pdf_bytes = f.read()
+                st.download_button(
+                    label="⬇️ Download audit workbook",
+                    data=pdf_bytes,  
+                    file_name="CyberRisk_Audit_Workbook.pdf",
+                    mime="application/pdf" 
+                )       
         else:
             st.warning("No audit workbook available for download. Please process the documents first.")
 else:
