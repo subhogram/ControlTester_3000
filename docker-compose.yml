@@ -65,6 +65,16 @@ services:
         reservations:
           memory: 512m
           cpus: '0.5'
+  
+  fastapi_api:
+    build:
+      context: .                    # must be root of repo
+      dockerfile: api/Dockerfile
+    ports:
+      - "8000:8000"
+    networks:
+      - appnet
+
 
 volumes:
   ollama_data:

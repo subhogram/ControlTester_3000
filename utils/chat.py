@@ -102,11 +102,18 @@ def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vecto
     if send_clicked and user_input.strip() != "":
         ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
         llm = OllamaLLM(model=selected_model, base_url=ollama_base_url)
-        kb_contexts = kb_vectorstore.similarity_search(user_input, k=3)
-        kb_context = "\n\n".join([c.page_content for c in kb_contexts])
+        
+        if kb_vectorstore is not None:
+            kb_contexts = kb_vectorstore.similarity_search(user_input, k=3)
+            kb_context = "\n\n".join([c.page_content for c in kb_contexts])
+        else:
+            kb_context = None
 
-        company_contexts = company_kb_vectorstore.similarity_search(user_input, k=3)
-        company_kb_context = "\n\n".join([c.page_content for c in company_contexts])
+        if company_kb_vectorstore is not None:
+            company_contexts = company_kb_vectorstore.similarity_search(user_input, k=3)
+            company_kb_context = "\n\n".join([c.page_content for c in company_contexts])
+        else:
+            company_kb_context = None
 
         if evid_vectorstore is not  None:
             evid_contexts = evid_vectorstore.similarity_search(user_input, k=3)
