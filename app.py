@@ -3,7 +3,7 @@ import shutil
 import streamlit as st
 from utils.find_llm import _ollama_models
 from utils.file_handlers import save_and_load_files
-from utils.llm_chain import build_evidence_vectorstore
+from utils.llm_chain import build_knowledge_base
 from utils.pdf_generator import generate_workbook
 from utils.chat import chat_with_bot
 import base64
@@ -114,16 +114,6 @@ if os.path.exists(VECTORSTORE_PATH) and not st.session_state.get('kb_ready', Fal
     )
     st.session_state['kb_ready'] = True
     st.session_state['kb_loaded_from_saved'] = True
-
-# Check if a saved company vectorstore exists
-if os.path.exists(COMPANY_VECTORSTORE_PATH) and not st.session_state.get('company_files_ready', False):
-    st.session_state['company_kb_vectorstore'] = FAISS.load_local(
-        COMPANY_VECTORSTORE_PATH,
-        OllamaEmbeddings(model="bge-m3:latest", base_url=OLLAMA_BASE_URL),
-        allow_dangerous_deserialization=True
-    )
-    st.session_state['company_files_ready'] = True  
-    st.session_state['company_kb_loaded_from_saved'] = True
     
 
 # --- Step 1: Upload Knowledge Base Documents ---
@@ -186,8 +176,7 @@ with st.expander("1️⃣ Upload training documents", expanded=True):
     if train_btn:
         with st.spinner("Processing and indexing knowledge base..."):
             kb_docs = save_and_load_files(policy_files)
-            llm_chain.initialize(selected_model)
-            kb_vectorstore = llm_chain.build_knowledge_base(kb_docs)            
+            kb_vectorstore = build_knowledge_base(kb_docs,selected_model)            
             st.session_state['kb_vectorstore'] = kb_vectorstore
             st.session_state['kb_ready'] = True
             st.session_state['bot_trained_success'] = True  # <-- enable Save on next rerun!
@@ -243,6 +232,16 @@ with st.expander("1️⃣ Upload training documents", expanded=True):
     else:
         st.warning("🚫 No trained model loaded. Please train or load a saved model.")
 
+# Check if a saved company vectorstore exists
+if os.path.exists(COMPANY_VECTORSTORE_PATH) and not st.session_state.get('company_files_ready', False):
+    st.session_state['company_kb_vectorstore'] = FAISS.load_local(
+        COMPANY_VECTORSTORE_PATH,
+        OllamaEmbeddings(model="bge-m3:latest", base_url=OLLAMA_BASE_URL),
+        allow_dangerous_deserialization=True
+    )
+    st.session_state['company_files_ready'] = True  
+    st.session_state['company_kb_loaded_from_saved'] = True
+
 # --- Step 2: Upload Company Resources ---
 with st.expander("2️⃣ Upload company resources", expanded=True):
     st.markdown(
@@ -254,6 +253,8 @@ with st.expander("2️⃣ Upload company resources", expanded=True):
         st.session_state['company_files_ready'] = False
     if 'company_kb_vectorstore' not in st.session_state:
         st.session_state['company_kb_vectorstore'] = None
+    if 'company_kb_loaded_from_saved' not in st.session_state:
+        st.session_state['company_kb_loaded_from_saved'] = False   
     
     company_files = st.file_uploader(
         "Upload Company Resources (PDF, TXT, CSV, XLSX)",
@@ -277,32 +278,30 @@ with st.expander("2️⃣ Upload company resources", expanded=True):
         with st.spinner("Processing company resources..."):
             # Here you can process the company files if needed            
             company_docs =  save_and_load_files(company_files)
-            llm_chain.initialize(selected_model)
-            company_kb_vectorstore = llm_chain.build_company_knowledge_base(company_docs)
+            company_kb_vectorstore = build_knowledge_base(company_docs,selected_model)
             st.session_state['company_kb_vectorstore'] = company_kb_vectorstore           
             st.session_state['company_files_ready'] = True
+            st.session_state['company_kb_loaded_from_saved'] = False
             if( st.session_state['company_kb_vectorstore'] and st.session_state['company_files_ready']):
-                st.session_state['company_kb_vectorstore'].save_local(COMPANY_VECTORSTORE_PATH)
+                st.session_state['company_kb_vectorstore'].save_local(COMPANY_VECTORSTORE_PATH)           
+                st.success("✅ Company resources uploaded successfully")   
     if clear_btn:
         if os.path.exists(COMPANY_VECTORSTORE_PATH):
             shutil.rmtree(COMPANY_VECTORSTORE_PATH)
-        st.session_state['company_files'] = None
-        st.session_state['company_files_ready'] = False        
-        if hasattr(st, "rerun"):
-            st.rerun()
+            st.session_state['company_files'] = None
+            st.session_state['company_files_ready'] = False            
+            st.session_state['company_kb_loaded_from_saved'] = False
+            st.toast("🗑️ Company resources cleared successfully.")
         else:
-            st.experimental_rerun()
-        st.success("🚮 Company resources cleared successfully!")
+            st.info("No saved resources found to delete.")     
+        # if hasattr(st, "rerun"):
+        #     st.rerun()
+        # else:
+        #     st.experimental_rerun()
+        
     
-    if st.session_state.get('company_kb_loaded_from_saved', False):
-        # if(st.session_state.get('kb_loaded_from_saved', False)):
-        #     merged_vectorstore = llm_chain.merge_knowledge_bases(
-        #         st.session_state['kb_vectorstore'],
-        #         st.session_state['company_kb_vectorstore']
-        #     )
-        #     st.session_state['merged_vectorstore'] = merged_vectorstore        
-            
-        st.success("✅ Company resources ready for assessment!")   
+    if st.session_state.get('company_kb_loaded_from_saved', False):      
+        st.warning("💽 Saved Company resources loaded")   
 
 # --- Step 2: Upload Evidence Files ---
 with st.expander("3️⃣ Upload files for assessment", expanded=True):   
@@ -332,7 +331,7 @@ with st.expander("3️⃣ Upload files for assessment", expanded=True):
         with st.spinner("Processing files..."):
             evidence_docs = save_and_load_files(evidence_files)
             evidence_docs_screenshot = llm_chain.render_text_to_image(evidence_files)
-            evid_vectorstore = build_evidence_vectorstore(evidence_docs)
+            evid_vectorstore = build_knowledge_base(evidence_docs,selected_model)
             st.session_state['evid_vectorstore'] = evid_vectorstore
             st.session_state['evidence_kb_ready'] = True
             st.toast("✅ Files Uploaded Successfully!")
