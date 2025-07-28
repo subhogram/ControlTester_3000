@@ -47,15 +47,23 @@ async def upload_files(files: List[UploadFile] = File(...)):
     temp_file_objs, temp_paths = convert_uploadfile_to_tempfiles(files)
     try:
         docs = save_and_load_files(temp_file_objs)
-        processed_files = [f.filename for f in files]
+        docs_json = [
+            {
+                "page_content": getattr(doc, "page_content", None),
+                "metadata": getattr(doc, "metadata", {})
+            }
+            for doc in docs
+        ]
         return JSONResponse(
             content={
-                "processed_files": processed_files,
-                "documents_extracted": len(docs)
+                "processed_files": [f.filename for f in files],
+                "documents": docs_json,
+                "documents_extracted": len(docs_json)
             }
         )
     finally:
-        # Cleanup temp files
+        # Clean up
+        import os
         for p in temp_paths:
             if os.path.exists(p):
                 os.unlink(p)
