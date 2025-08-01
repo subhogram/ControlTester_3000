@@ -203,3 +203,4 @@ xlsxwriter==3.2.3
 yarl==1.20.0
 zopfli==0.2.3.post1
 zstandard==0.23.0
+uvicorn[standard]

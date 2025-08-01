@@ -1,4 +1,5 @@
 import time
+from utils.file_handlers import save_and_load_files
 from utils.assessment_schema import Assessment
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -12,17 +13,27 @@ from langchain.output_parsers import PydanticOutputParser
 from langchain.prompts import PromptTemplate
 from pydantic import ValidationError
 import os
+import warnings
+import json
+import re
+import json
+import io
+from PIL import Image, ImageDraw, ImageFont
+
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 # Get Ollama base URL from environment variable
 OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-
-import warnings
-import json
-warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
-
-
 embeddings = OllamaEmbeddings(model="bge-m3:latest",base_url=OLLAMA_BASE_URL)  # Ensure faiss-gpu is installed for GPU usage
 llm = OllamaLLM(model="bge-m3:latest", base_url=OLLAMA_BASE_URL, temperature = 0)
+
+# Setup Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
 
 def initialize(selected_model):
     """
@@ -33,14 +44,6 @@ def initialize(selected_model):
     global llm
     llm = OllamaLLM(model=selected_model, base_url=OLLAMA_BASE_URL)
     
-# Setup Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
-
 # LangChain components
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=800,  # Larger chunks for policy context
@@ -52,14 +55,16 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 # ----------------- BASE KNOWLEDGE BASE BUILDER -----------------------
 
-def build_knowledge_base(docs, batch_size=5, delay_between_batches=1.0, max_retries=3):
+def build_knowledge_base(files, selected_model, batch_size=15, delay_between_batches=0.2, max_retries=3):
     """
     Build a FAISS vectorstore from a list of documents with timeout handling.
     This is a drop-in replacement for your existing function.
     """
-
+    initialize(selected_model)
     start = time.time()
     all_documents = []
+
+    docs = save_and_load_files(files)
 
     # Extract and split texts into Document objects
     for i, doc in enumerate(docs):
@@ -135,187 +140,8 @@ def build_knowledge_base(docs, batch_size=5, delay_between_batches=1.0, max_retr
     logger.info(f"Knowledge base built in {total_time:.2f} seconds.")
     return kb_vectorstore
 
-# ------------------- COMPANY KNOWLEDGE BASE BUILDER -------------------
-
-company_text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=800,  # Larger chunks for policy context
-    chunk_overlap=100,
-    length_function=len,
-    add_start_index=True,
-    separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
-)
-
-def build_company_knowledge_base(
-    docs,
-    max_workers=8,
-    max_retries=2,
-    retry_delay=0.5,
-    batch_size=10,
-    batch_vectorstore=True,
-    batch_vectorstore_size=1000,
-):
-    """
-    Builds a knowledge base vectorstore from the provided documents using the company-specific text splitter.
-    Processes documents in parallel using threads, with batch processing and a max retries option for each document.
-    To avoid server/terminal timeouts, optionally builds the vectorstore in batches and merges them at the end.
-    Returns the vectorstore object.
-    """
-    start = time.time()
-    all_texts = []
-    all_metadatas = []
-    total_chunks = 0
-    processed_files = 0
-
-    def process_doc_with_retries(i, doc):
-        last_exception = None
-        for attempt in range(max_retries + 1):
-            try:
-                if not doc.page_content.strip():
-                    logger.warning(f"Document {i} is empty and skipped.")
-                    return [], []
-                splits = company_text_splitter.split_text(doc.page_content)
-                meta = getattr(doc, "metadata", {}) if hasattr(doc, "metadata") else {}
-                doc_texts = []
-                doc_metas = []
-                for split_idx, split in enumerate(splits):
-                    if not split.strip():
-                        continue
-                    split_metadata = meta.copy()
-                    split_metadata["split_index"] = split_idx
-                    split_metadata["total_splits"] = len(splits)
-                    doc_texts.append(split)
-                    doc_metas.append(split_metadata)
-                return doc_texts, doc_metas
-            except Exception as e:
-                last_exception = e
-                logger.error(f"Error processing document {i} (attempt {attempt + 1}/{max_retries + 1}): {e}")
-                if attempt < max_retries:
-                    time.sleep(retry_delay)
-        logger.critical(f"Document {i} failed after {max_retries + 1} attempts: {last_exception}")
-        return [], []
-
-    def batch(iterable, n):
-        """Yield successive n-sized batches from iterable."""
-        for i in range(0, len(iterable), n):
-            yield iterable[i:i + n]
-
-    total_batches = (len(docs) + batch_size - 1) // batch_size
-    current_batch_num = 0
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for doc_batch in batch(list(enumerate(docs)), batch_size):
-            current_batch_num += 1
-            batch_docs = [doc for _, doc in doc_batch]
-            logger.info(
-                f"Processing batch {current_batch_num}/{total_batches} ({len(batch_docs)} documents)"
-            )
-            future_to_index = {
-                executor.submit(process_doc_with_retries, i, doc): i
-                for i, doc in doc_batch
-            }
-            for future in as_completed(future_to_index):
-                i = future_to_index[future]
-                try:
-                    doc_texts, doc_metas = future.result()
-                    if doc_texts:
-                        all_texts.extend(doc_texts)
-                        all_metadatas.extend(doc_metas)
-                        processed_files += 1
-                        total_chunks += len(doc_texts)
-                except Exception as exc:
-                    logger.error(f"Document {i} generated an exception: {exc}")
-
-    if not all_texts:
-        raise ValueError("No valid content found in input documents.")
-
-    logger.info(f"Processed {processed_files} files into {total_chunks} chunks")
-
-    # To avoid server/terminal timeouts, build the vectorstore in batches and merge if necessary
-    try:
-        if batch_vectorstore and len(all_texts) > batch_vectorstore_size:
-            logger.info(
-                f"Building vectorstore in batches of {batch_vectorstore_size} to avoid timeouts..."
-            )
-            vectorstores = []
-            for batch_num, (text_batch, meta_batch) in enumerate(
-                zip(batch(all_texts, batch_vectorstore_size), batch(all_metadatas, batch_vectorstore_size)), 1
-            ):
-                logger.info(
-                    f"Building vectorstore batch {batch_num}/"
-                    f"{(len(all_texts) + batch_vectorstore_size - 1) // batch_vectorstore_size} "
-                    f"({len(text_batch)} chunks)"
-                )
-                vs = FAISS.from_texts(text_batch, embedding=embeddings, metadatas=meta_batch)
-                vectorstores.append(vs)
-            # Merge all vectorstores into one
-            company_vectorstore = vectorstores[0]
-            for vs in vectorstores[1:]:
-                company_vectorstore.merge_from(vs)
-            logger.info(f"Company vector store (batched) built successfully with {company_vectorstore.index.ntotal} vectors.")
-        else:
-            company_vectorstore = FAISS.from_texts(all_texts, embedding=embeddings, metadatas=all_metadatas)
-            logger.info(f"Company vector store built successfully with {company_vectorstore.index.ntotal} vectors.")
-
-        # Log category distribution
-        category_counts = {}
-        for meta in all_metadatas:
-            cat = meta.get("category", "unknown")
-            category_counts[cat] = category_counts.get(cat, 0) + 1
-
-        logger.info("Category distribution:")
-        for cat, count in sorted(category_counts.items()):
-            logger.info(f"  {cat}: {count} chunks")
-
-    except Exception as e:
-        logger.critical(f"Vector store creation failed: {e}")
-        raise
-
-    total_time = time.time() - start
-    logger.info(f"Company Knowledge base built in {total_time:.2f} seconds.")
-
-    return company_vectorstore
-
-# ----------------- PARALLEL EVIDENCE ASSESSMENT ------------------------
-def build_evidence_vectorstore(evidence_docs):
-    """
-    Builds a FAISS vectorstore from the provided evidence documents.
-    Returns the vectorstore object.
-    """
-    texts = []
-    metadatas = []
-    for i, doc in enumerate(evidence_docs):
-        try:
-            if not doc.page_content.strip():
-                continue
-            splits = text_splitter.split_text(doc.page_content)
-            meta = getattr(doc, "metadata", {}) if hasattr(doc, "metadata") else {}
-            for split in splits:
-                texts.append(split)
-                metadatas.append(meta)        
-        except Exception as e:
-            logger.error(f"Error uploading evidence document {i}: {e}")
-    
-    if not texts:
-        raise ValueError("No valid content found in evidence documents.")
-
-    try:
-        evidence_vectorstore = FAISS.from_texts(texts, embedding=embeddings, metadatas=metadatas)
-        logger.info(f"Evidence vector store built successfully with {evidence_vectorstore.index.ntotal} vectors.")
-    except Exception as e:
-        logger.critical(f"Evidence vector store creation failed: {e}")
-        raise
-
-    return evidence_vectorstore
-
-
-
-
 
 # ----------------- ASSESS EVIDENCE WITH KNOWLEDGE BASE -----------------
-import re
-import json
-import io
-from PIL import Image, ImageDraw, ImageFont
 
 def extract_and_validate_json(text):
     """
