@@ -1,4 +1,5 @@
 import time
+from utils.file_handlers import save_and_load_files
 from utils.assessment_schema import Assessment
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -12,17 +13,28 @@ from langchain.output_parsers import PydanticOutputParser
 from langchain.prompts import PromptTemplate
 from pydantic import ValidationError
 import os
-
-# Get Ollama base URL from environment variable
-OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-
 import warnings
 import json
+import re
+import json
+import io
+from PIL import Image, ImageDraw, ImageFont
+
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
-
+# Get Ollama base URL from environment variable
+# OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://ollama:11434')
+OLLAMA_BASE_URL = 'http://ollama:11434'
 embeddings = OllamaEmbeddings(model="bge-m3:latest",base_url=OLLAMA_BASE_URL)  # Ensure faiss-gpu is installed for GPU usage
 llm = OllamaLLM(model="bge-m3:latest", base_url=OLLAMA_BASE_URL, temperature = 0)
+
+# Setup Logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler()]
+)
+logger = logging.getLogger(__name__)
 
 def initialize(selected_model):
     """
@@ -33,14 +45,6 @@ def initialize(selected_model):
     global llm
     llm = OllamaLLM(model=selected_model, base_url=OLLAMA_BASE_URL)
     
-# Setup Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler()]
-)
-logger = logging.getLogger(__name__)
-
 # LangChain components
 text_splitter = RecursiveCharacterTextSplitter(
     chunk_size=800,  # Larger chunks for policy context
@@ -52,7 +56,7 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 # ----------------- BASE KNOWLEDGE BASE BUILDER -----------------------
 
-def build_knowledge_base(docs, selected_model, batch_size=5, delay_between_batches=1.0, max_retries=3):
+def build_knowledge_base(files, selected_model, batch_size=15, delay_between_batches=0.2, max_retries=3):
     """
     Build a FAISS vectorstore from a list of documents with timeout handling.
     This is a drop-in replacement for your existing function.
@@ -60,6 +64,8 @@ def build_knowledge_base(docs, selected_model, batch_size=5, delay_between_batch
     initialize(selected_model)
     start = time.time()
     all_documents = []
+
+    docs = save_and_load_files(files)
 
     # Extract and split texts into Document objects
     for i, doc in enumerate(docs):
@@ -137,10 +143,6 @@ def build_knowledge_base(docs, selected_model, batch_size=5, delay_between_batch
 
 
 # ----------------- ASSESS EVIDENCE WITH KNOWLEDGE BASE -----------------
-import re
-import json
-import io
-from PIL import Image, ImageDraw, ImageFont
 
 def extract_and_validate_json(text):
     """

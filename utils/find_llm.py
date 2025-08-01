@@ -1,9 +1,12 @@
 import requests
+import os
+
    
 # use Cache for 60 seconds to avoid frequent API calls
 def get_ollama_model_names():
+    OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')+"/api/tags"    
     try:
-        response = requests.get("http://ollama:11434/api/tags", timeout=5)
+        response = requests.get(OLLAMA_BASE_URL, timeout=5)
         if response.status_code == 200:
             models_data = response.json()
             return [model['name'] for model in models_data.get('models', [])]

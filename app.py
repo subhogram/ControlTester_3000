@@ -3,7 +3,7 @@ import shutil
 import streamlit as st
 from utils.find_llm import _ollama_models
 from utils.file_handlers import save_and_load_files
-from utils.llm_chain import build_knowledge_base
+from utils.llm_chain import assess_evidence_with_kb, build_knowledge_base
 from utils.pdf_generator import generate_workbook
 from utils.chat import chat_with_bot
 import base64
@@ -145,43 +145,47 @@ with st.expander("1️⃣ Upload training documents", expanded=True):
         st.session_state['evidence_kb_ready'] = False
 
      # --- Dynamic Button States ---
-    train_disabled = not (policy_files and len(policy_files) > 0)
+    upload_disabled = not (policy_files and len(policy_files) > 0)
     save_disabled = not st.session_state.get('bot_trained_success', False)
     delete_disabled = not os.path.exists(VECTORSTORE_PATH)
 
-    col1, col2, col3 = st.columns([2, 2, 2])
+    col1, col2, _ = st.columns([2, 2, 2])
     with col1:
-        train_btn = st.button(
-            "🔄 Train model",
-            help="Train bot on uploaded documents",
-            disabled=train_disabled,
-            key="train_btn"
+        upld_btn = st.button(
+            "📤 Upload",
+            help="Upload information security policies",
+            disabled=upload_disabled,
+            key="upld_btn"
         )
+    # with col2:
+    #     save_btn = st.button(
+    #         "💾 Save model",
+    #         disabled=save_disabled,
+    #         help="Save the trained model",
+    #         key="save_btn"
+    #     )
     with col2:
-        save_btn = st.button(
-            "💾 Save model",
-            disabled=save_disabled,
-            help="Save the trained model",
-            key="save_btn"
-        )
-    with col3:
         delete_btn = st.button(
-            "🗑️ Delete saved model",
+            "🗑️ Clear",
             disabled=delete_disabled,
             help="Delete the saved model",
             key="delete_btn"
         ) 
 
    # Train bot on KB
-    if train_btn:
+    if upld_btn:
         with st.spinner("Processing and indexing knowledge base..."):
-            kb_docs = save_and_load_files(policy_files)
-            kb_vectorstore = build_knowledge_base(kb_docs,selected_model)            
+            # kb_docs = save_and_load_files(policy_files)
+            # kb_vectorstore = build_knowledge_base(kb_docs,selected_model)
+            kb_vectorstore = build_knowledge_base(policy_files,selected_model)            
             st.session_state['kb_vectorstore'] = kb_vectorstore
             st.session_state['kb_ready'] = True
             st.session_state['bot_trained_success'] = True  # <-- enable Save on next rerun!
             st.session_state['bot_saved'] = False  # Not yet saved after new training
             st.session_state['kb_loaded_from_saved'] = False
+            if( st.session_state['kb_vectorstore'] and st.session_state['kb_ready']):
+                st.session_state['kb_vectorstore'].save_local(VECTORSTORE_PATH)           
+                st.success("✅ Information Security Policies uploaded successfully")   
         # Optionally force a rerun so Save enables immediately
         if hasattr(st, "rerun"):
             st.rerun()
@@ -189,20 +193,20 @@ with st.expander("1️⃣ Upload training documents", expanded=True):
             st.experimental_rerun()
 
     # Save trained bot
-    if save_btn and not save_disabled:
-        if 'kb_vectorstore' in st.session_state and st.session_state['kb_vectorstore'] is not None:
-            st.session_state['kb_vectorstore'].save_local(VECTORSTORE_PATH)
-            st.success("💾 Trained bot saved successfully!")
-            st.session_state['bot_trained_success'] = False
-            st.session_state['bot_saved'] = True
-            st.session_state['kb_loaded_from_saved'] = True
-        else:
-            st.error("No trained model to save. Please train the model first.")
+    # if save_btn and not save_disabled:
+    #     if 'kb_vectorstore' in st.session_state and st.session_state['kb_vectorstore'] is not None:
+    #         st.session_state['kb_vectorstore'].save_local(VECTORSTORE_PATH)
+    #         st.success("💾 Trained bot saved successfully!")
+    #         st.session_state['bot_trained_success'] = False
+    #         st.session_state['bot_saved'] = True
+    #         st.session_state['kb_loaded_from_saved'] = True
+    #     else:
+    #         st.error("No trained model to save. Please train the model first.")
         
-        if hasattr(st, "rerun"):
-            st.rerun()
-        else:
-            st.experimental_rerun()
+    #     if hasattr(st, "rerun"):
+    #         st.rerun()
+    #     else:
+    #         st.experimental_rerun()
 
     # Delete previous trained bot
     if delete_btn and not delete_disabled:
@@ -224,9 +228,9 @@ with st.expander("1️⃣ Upload training documents", expanded=True):
 
     # Show persistent training success message
     if st.session_state.get('bot_trained_success', False):
-        st.success("✅ Model trained and ready!")
+        st.success("✅ Training documents uploaded!")
     elif st.session_state.get('bot_saved', False):
-        st.info("💾 A trained model is saved, ready for use.")
+        st.info("💾 Model is trained on documents, ready for use.")
     elif st.session_state.get('kb_loaded_from_saved', False):
         st.warning("💽 A saved trained model is loaded and ready for use.")
     else:
@@ -243,7 +247,7 @@ if os.path.exists(COMPANY_VECTORSTORE_PATH) and not st.session_state.get('compan
     st.session_state['company_kb_loaded_from_saved'] = True
 
 # --- Step 2: Upload Company Resources ---
-with st.expander("2️⃣ Upload company resources", expanded=True):
+with st.expander("2️⃣ Upload company documents", expanded=True):
     st.markdown(
         "Upload your company resources such as SOC 2 reports, CRI profiles, or other relevant documents. "
         "These will be used to assess your files against the knowledge base."
@@ -266,7 +270,7 @@ with st.expander("2️⃣ Upload company resources", expanded=True):
         upload_btn = st.button(
             "📤 Upload",
             disabled=not (company_files and len(company_files) > 0),
-            help="Upload company resources to assess against the knowledge base."
+            help="Upload company documents"
         )
     with col2:
         clear_btn = st.button(
@@ -277,14 +281,15 @@ with st.expander("2️⃣ Upload company resources", expanded=True):
     if upload_btn:
         with st.spinner("Processing company resources..."):
             # Here you can process the company files if needed            
-            company_docs =  save_and_load_files(company_files)
-            company_kb_vectorstore = build_knowledge_base(company_docs,selected_model)
+            # company_docs =  save_and_load_files(company_files)
+            company_kb_vectorstore = build_knowledge_base(company_files,selected_model)
             st.session_state['company_kb_vectorstore'] = company_kb_vectorstore           
             st.session_state['company_files_ready'] = True
             st.session_state['company_kb_loaded_from_saved'] = False
             if( st.session_state['company_kb_vectorstore'] and st.session_state['company_files_ready']):
                 st.session_state['company_kb_vectorstore'].save_local(COMPANY_VECTORSTORE_PATH)           
-                st.success("✅ Company resources uploaded successfully")   
+                st.success("✅ Company documents uploaded successfully") 
+           
     if clear_btn:
         if os.path.exists(COMPANY_VECTORSTORE_PATH):
             shutil.rmtree(COMPANY_VECTORSTORE_PATH)
@@ -300,8 +305,12 @@ with st.expander("2️⃣ Upload company resources", expanded=True):
         #     st.experimental_rerun()
         
     
-    if st.session_state.get('company_kb_loaded_from_saved', False):      
-        st.warning("💽 Saved Company resources loaded")   
+    if st.session_state.get('company_files_ready', False):
+        st.success("✅ Company resources uploaded!")
+    elif st.session_state.get('company_kb_loaded_from_saved', False):      
+        st.warning("💽 Saved Company resources loaded") 
+    else:
+        st.warning("🚫 No company resources present. Please upload company resources.")
 
 # --- Step 2: Upload Evidence Files ---
 with st.expander("3️⃣ Upload files for assessment", expanded=True):   
@@ -316,7 +325,7 @@ with st.expander("3️⃣ Upload files for assessment", expanded=True):
     col1, col2, _ = st.columns([2, 2, 2])
     with col1:
         upload_evidence_btn = st.button(
-            "📤 Upload Files",
+            "📤 Upload",
             disabled=not (evidence_files and len(evidence_files) > 0),
             help="Upload files to assess."
         )
@@ -329,9 +338,9 @@ with st.expander("3️⃣ Upload files for assessment", expanded=True):
     evidence_docs_screenshot = None
     if upload_evidence_btn:
         with st.spinner("Processing files..."):
-            evidence_docs = save_and_load_files(evidence_files)
+            # evidence_docs = save_and_load_files(evidence_files)
             evidence_docs_screenshot = llm_chain.render_text_to_image(evidence_files)
-            evid_vectorstore = build_knowledge_base(evidence_docs,selected_model)
+            evid_vectorstore = build_knowledge_base(evidence_files,selected_model)
             st.session_state['evid_vectorstore'] = evid_vectorstore
             st.session_state['evidence_kb_ready'] = True
             st.toast("✅ Files Uploaded Successfully!")
@@ -347,8 +356,7 @@ with st.expander("3️⃣ Upload files for assessment", expanded=True):
                   
             if assessment is None:
                 evidence_docs = save_and_load_files(evidence_files)
-                llm_chain.initialize(selected_model) 
-                assessment = llm_chain.assess_evidence_with_kb(
+                assessment = assess_evidence_with_kb(
                     evidence_docs,
                     st.session_state['kb_vectorstore'],
                     st.session_state['company_kb_vectorstore']
