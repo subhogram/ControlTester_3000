@@ -1,7 +1,9 @@
 FROM python:3.11-slim
 
 WORKDIR /app
-
+# Create directories for files with proper permissions
+RUN mkdir -p /app/workbooks /app/temp_files
+RUN chmod 755 /app/workbooks /app/temp_files
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
