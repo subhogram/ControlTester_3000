@@ -23,8 +23,7 @@ from PIL import Image, ImageDraw, ImageFont
 warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 # Get Ollama base URL from environment variable
-# OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://ollama:11434')
-OLLAMA_BASE_URL = 'http://ollama:11434'
+OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
 embeddings = OllamaEmbeddings(model="bge-m3:latest",base_url=OLLAMA_BASE_URL)  # Ensure faiss-gpu is installed for GPU usage
 llm = OllamaLLM(model="bge-m3:latest", base_url=OLLAMA_BASE_URL, temperature = 0)
 
