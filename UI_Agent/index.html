@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agent - Document Management</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <h2 class="sidebar-title">AI Agent</h2>
+                <div class="api-status" id="api-status">
+                    <span class="status-indicator" id="status-indicator">⚪</span>
+                    <span class="status-text" id="status-text">Checking...</span>
+                </div>
+            </div>
+            <ul class="sidebar-nav">
+                <li class="nav-item">
+                    <button class="nav-link active" data-tab="document-management">
+                        <span class="nav-icon">📄</span>
+                        <span class="nav-text">Document Management</span>
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-tab="chat">
+                        <span class="nav-icon">💬</span>
+                        <span class="nav-text">Chat</span>
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link" data-tab="settings">
+                        <span class="nav-icon">⚙️</span>
+                        <span class="nav-text">Settings</span>
+                    </button>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Document Management Tab -->
+            <div id="document-management" class="tab-content active">
+                <header class="content-header">
+                    <h1>Document Management</h1>
+                    <p class="content-description">Upload and manage documents for AI knowledge retrieval through Faiss vectorstore conversion</p>
+                </header>
+
+                <!-- Model Selection -->
+                <div class="model-selection-section">
+                    <div class="model-selection-card">
+                        <h3>Ollama Model Selection</h3>
+                        <div class="model-selection-content">
+                            <select id="model-selector" class="form-control">
+                                <option value="">Loading models...</option>
+                            </select>
+                            <button id="refresh-models" class="btn btn--outline btn--sm">🔄 Refresh</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="document-sections">
+                    <!-- General Documents Section -->
+                    <div class="document-card">
+                        <div class="card-header">
+                            <div class="card-title-section">
+                                <h3 class="card-title">General Documents</h3>
+                                <div class="file-summary" id="general-summary">
+                                    <span class="file-count" id="general-count">0 files uploaded</span>
+                                    <span class="file-size" id="general-size">0 MB</span>
+                                </div>
+                            </div>
+                            <div class="card-status" id="general-status">
+                                <span class="status status--info">🏗️ Ready to Build</span>
+                            </div>
+                        </div>
+                        
+                        <div class="card-body">
+                            <p class="card-description">Upload general reference documents that will be converted to Faiss vectorstore for AI knowledge retrieval</p>
+                            
+                            <div class="upload-area" id="general-upload-area">
+                                <input type="file" id="general-file-input" multiple accept=".pdf,.txt,.docx,.md" style="display: none;">
+                                <div class="upload-content">
+                                    <div class="upload-icon">📁</div>
+                                    <p class="upload-text">
+                                        <strong>Drag and drop files here</strong><br>
+                                        or <button class="upload-link">browse files</button>
+                                    </p>
+                                    <p class="upload-info">Supported formats: PDF, TXT, DOCX, MD (No size limits)</p>
+                                </div>
+                            </div>
+
+                            <div class="build-section">
+                                <button class="btn btn--primary build-kb-btn" id="build-general-kb" disabled>
+                                    <span class="btn-icon">🏗️</span>
+                                    Build Knowledge Base
+                                </button>
+                                <div class="build-options">
+                                    <label class="option-label">
+                                        Batch Size: 
+                                        <input type="number" id="general-batch-size" value="15" min="1" max="50" class="form-control option-input">
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Company Documents Section -->
+                    <div class="document-card">
+                        <div class="card-header">
+                            <div class="card-title-section">
+                                <h3 class="card-title">Company Documents</h3>
+                                <div class="file-summary" id="company-summary">
+                                    <span class="file-count" id="company-count">0 files uploaded</span>
+                                    <span class="file-size" id="company-size">0 MB</span>
+                                </div>
+                            </div>
+                            <div class="card-status" id="company-status">
+                                <span class="status status--info">🏗️ Ready to Build</span>
+                            </div>
+                        </div>
+                        
+                        <div class="card-body">
+                            <p class="card-description">Upload company-specific documents for conversion to Faiss vectorstore and storage in company folder</p>
+                            
+                            <div class="upload-area" id="company-upload-area">
+                                <input type="file" id="company-file-input" multiple accept=".pdf,.txt,.docx,.md,.xlsx" style="display: none;">
+                                <div class="upload-content">
+                                    <div class="upload-icon">📁</div>
+                                    <p class="upload-text">
+                                        <strong>Drag and drop files here</strong><br>
+                                        or <button class="upload-link">browse files</button>
+                                    </p>
+                                    <p class="upload-info">Supported formats: PDF, TXT, DOCX, MD, XLSX (No size limits)</p>
+                                </div>
+                            </div>
+
+                            <div class="build-section">
+                                <button class="btn btn--primary build-kb-btn" id="build-company-kb" disabled>
+                                    <span class="btn-icon">🏗️</span>
+                                    Build Knowledge Base
+                                </button>
+                                <div class="build-options">
+                                    <label class="option-label">
+                                        Batch Size: 
+                                        <input type="number" id="company-batch-size" value="15" min="1" max="50" class="form-control option-input">
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Build Results -->
+                <div class="build-results" id="build-results" style="display: none;">
+                    <div class="results-card">
+                        <h3>Knowledge Base Build Results</h3>
+                        <div class="results-content" id="results-content">
+                            <!-- Results will be populated here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Tab (Placeholder) -->
+            <div id="chat" class="tab-content">
+                <header class="content-header">
+                    <h1>Chat Interface</h1>
+                    <p class="content-description">Coming Soon - AI Chat interface with document knowledge retrieval</p>
+                </header>
+                <div class="placeholder-content">
+                    <div class="placeholder-icon">💬</div>
+                    <h3>Chat Feature Under Development</h3>
+                    <p>This feature will allow you to chat with your uploaded documents using AI.</p>
+                </div>
+            </div>
+
+            <!-- Settings Tab (Placeholder) -->
+            <div id="settings" class="tab-content">
+                <header class="content-header">
+                    <h1>Settings</h1>
+                    <p class="content-description">Configure your AI agent preferences and document processing settings</p>
+                </header>
+                <div class="placeholder-content">
+                    <div class="placeholder-icon">⚙️</div>
+                    <h3>Settings Configuration</h3>
+                    <p>Customize AI behavior, processing preferences, and system configuration.</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Processing Modal -->
+    <div class="modal hidden" id="processing-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Building Knowledge Base</h3>
+            </div>
+            <div class="modal-body">
+                <div class="processing-info">
+                    <div class="processing-icon" id="processing-icon">⬆️</div>
+                    <div class="processing-text">
+                        <h4 id="processing-section">General Documents</h4>
+                        <p id="processing-status">Uploading files to API...</p>
+                    </div>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div class="processing-details" id="processing-details">
+                    <!-- Real-time processing details will appear here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
