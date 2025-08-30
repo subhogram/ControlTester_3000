@@ -3,18 +3,36 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Agent - Document Management</title>
+    <title>AI Agent - Document Management (Fixed)</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="app-container">
+        <!-- Debug Console Toggle -->
+        <button class="debug-toggle" id="debug-toggle">🐛 Debug Console</button>
+        
+        <!-- Debug Panel -->
+        <div class="debug-panel hidden" id="debug-panel">
+            <div class="debug-header">
+                <h3>Debug Console</h3>
+                <button class="debug-close" id="debug-close">&times;</button>
+            </div>
+            <div class="debug-content">
+                <div class="debug-controls">
+                    <button class="btn btn--sm btn--outline" id="debug-clear">Clear</button>
+                    <button class="btn btn--sm btn--outline" id="debug-download">Download Log</button>
+                </div>
+                <div class="debug-output" id="debug-output"></div>
+            </div>
+        </div>
+
         <!-- Sidebar Navigation -->
         <nav class="sidebar">
             <div class="sidebar-header">
                 <h2 class="sidebar-title">AI Agent</h2>
                 <div class="api-status" id="api-status">
-                    <span class="status-indicator" id="status-indicator">⚪</span>
-                    <span class="status-text" id="status-text">Checking...</span>
+                    <span class="status-indicator" id="status-indicator">🔴</span>
+                    <span class="status-text" id="status-text">API Disconnected</span>
                 </div>
             </div>
             <ul class="sidebar-nav">
@@ -43,20 +61,33 @@
         <main class="main-content">
             <!-- Document Management Tab -->
             <div id="document-management" class="tab-content active">
-                <header class="content-header">
-                    <h1>Document Management</h1>
-                    <p class="content-description">Upload and manage documents for AI knowledge retrieval through Faiss vectorstore conversion</p>
-                </header>
-
-                <!-- Model Selection -->
-                <div class="model-selection-section">
-                    <div class="model-selection-card">
-                        <h3>Ollama Model Selection</h3>
-                        <div class="model-selection-content">
-                            <select id="model-selector" class="form-control">
+                <!-- Model Selection Header -->
+                <div class="model-selection-header">
+                    <div class="content-header">
+                        <h1>Document Management</h1>
+                        <p class="content-description">Upload documents and build knowledge bases with enhanced error handling and debugging</p>
+                    </div>
+                    
+                    <div class="model-selector-container">
+                        <!-- Model Selection Dropdown -->
+                        <div class="model-selector" id="model-selector">
+                            <label class="form-label">Select Ollama Model for Session:</label>
+                            <select class="form-control" id="session-model-select">
                                 <option value="">Loading models...</option>
                             </select>
-                            <button id="refresh-models" class="btn btn--outline btn--sm">🔄 Refresh</button>
+                            <div class="model-validation" id="model-validation"></div>
+                        </div>
+                        
+                        <!-- Selected Model Display -->
+                        <div class="selected-model-display" id="selected-model-display" style="display: none;">
+                            <div class="selected-model-info">
+                                <span class="model-label">Using model:</span>
+                                <strong class="model-name" id="selected-model-name"></strong>
+                                <span class="model-status">(locked for session)</span>
+                            </div>
+                            <button class="btn btn--outline btn--sm change-model-btn" id="change-model-btn">
+                                Change Model
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -67,18 +98,15 @@
                         <div class="card-header">
                             <div class="card-title-section">
                                 <h3 class="card-title">General Documents</h3>
-                                <div class="file-summary" id="general-summary">
-                                    <span class="file-count" id="general-count">0 files uploaded</span>
-                                    <span class="file-size" id="general-size">0 MB</span>
-                                </div>
+                                <span class="document-count" id="general-count">0 documents</span>
                             </div>
                             <div class="card-status" id="general-status">
-                                <span class="status status--info">🏗️ Ready to Build</span>
+                                <span class="status status--info">Select model to enable building</span>
                             </div>
                         </div>
                         
                         <div class="card-body">
-                            <p class="card-description">Upload general reference documents that will be converted to Faiss vectorstore for AI knowledge retrieval</p>
+                            <p class="card-description">Upload general documents for global knowledge base creation using Faiss vectorstore</p>
                             
                             <div class="upload-area" id="general-upload-area">
                                 <input type="file" id="general-file-input" multiple accept=".pdf,.txt,.docx,.md" style="display: none;">
@@ -88,21 +116,34 @@
                                         <strong>Drag and drop files here</strong><br>
                                         or <button class="upload-link">browse files</button>
                                     </p>
-                                    <p class="upload-info">Supported formats: PDF, TXT, DOCX, MD (No size limits)</p>
+                                    <p class="upload-info">Supported formats: PDF, TXT, DOCX, MD (Max 10MB each)</p>
                                 </div>
                             </div>
 
                             <div class="build-section">
-                                <button class="btn btn--primary build-kb-btn" id="build-general-kb" disabled>
-                                    <span class="btn-icon">🏗️</span>
-                                    Build Knowledge Base
+                                <button class="btn btn--primary btn--full-width build-btn" id="general-build-btn" disabled>
+                                    🏗️ Build & Save Knowledge Base
                                 </button>
-                                <div class="build-options">
-                                    <label class="option-label">
-                                        Batch Size: 
-                                        <input type="number" id="general-batch-size" value="15" min="1" max="50" class="form-control option-input">
-                                    </label>
+                                <p class="build-hint" id="general-build-hint">Select a model above to enable building</p>
+                            </div>
+
+                            <div class="status-display" id="general-status-display">
+                                <div class="status-item">
+                                    <span class="status-label">Build Status:</span>
+                                    <span class="status-value" id="general-build-status">Select model to enable building</span>
                                 </div>
+                                <div class="status-item">
+                                    <span class="status-label">Save Status:</span>
+                                    <span class="status-value" id="general-save-status">Not Saved</span>
+                                </div>
+                                <div class="status-item saved-path-item" id="general-saved-path-item" style="display: none;">
+                                    <span class="status-label">Saved Path:</span>
+                                    <span class="status-value saved-path" id="general-saved-path"></span>
+                                </div>
+                            </div>
+
+                            <div class="document-list" id="general-documents">
+                                <!-- Documents will be populated here -->
                             </div>
                         </div>
                     </div>
@@ -112,18 +153,15 @@
                         <div class="card-header">
                             <div class="card-title-section">
                                 <h3 class="card-title">Company Documents</h3>
-                                <div class="file-summary" id="company-summary">
-                                    <span class="file-count" id="company-count">0 files uploaded</span>
-                                    <span class="file-size" id="company-size">0 MB</span>
-                                </div>
+                                <span class="document-count" id="company-count">0 documents</span>
                             </div>
                             <div class="card-status" id="company-status">
-                                <span class="status status--info">🏗️ Ready to Build</span>
+                                <span class="status status--info">Select model to enable building</span>
                             </div>
                         </div>
                         
                         <div class="card-body">
-                            <p class="card-description">Upload company-specific documents for conversion to Faiss vectorstore and storage in company folder</p>
+                            <p class="card-description">Upload company-specific documents for company knowledge base creation and storage</p>
                             
                             <div class="upload-area" id="company-upload-area">
                                 <input type="file" id="company-file-input" multiple accept=".pdf,.txt,.docx,.md,.xlsx" style="display: none;">
@@ -133,32 +171,35 @@
                                         <strong>Drag and drop files here</strong><br>
                                         or <button class="upload-link">browse files</button>
                                     </p>
-                                    <p class="upload-info">Supported formats: PDF, TXT, DOCX, MD, XLSX (No size limits)</p>
+                                    <p class="upload-info">Supported formats: PDF, TXT, DOCX, MD, XLSX (Max 10MB each)</p>
                                 </div>
                             </div>
 
                             <div class="build-section">
-                                <button class="btn btn--primary build-kb-btn" id="build-company-kb" disabled>
-                                    <span class="btn-icon">🏗️</span>
-                                    Build Knowledge Base
+                                <button class="btn btn--primary btn--full-width build-btn" id="company-build-btn" disabled>
+                                    🏗️ Build & Save Knowledge Base
                                 </button>
-                                <div class="build-options">
-                                    <label class="option-label">
-                                        Batch Size: 
-                                        <input type="number" id="company-batch-size" value="15" min="1" max="50" class="form-control option-input">
-                                    </label>
+                                <p class="build-hint" id="company-build-hint">Select a model above to enable building</p>
+                            </div>
+
+                            <div class="status-display" id="company-status-display">
+                                <div class="status-item">
+                                    <span class="status-label">Build Status:</span>
+                                    <span class="status-value" id="company-build-status">Select model to enable building</span>
+                                </div>
+                                <div class="status-item">
+                                    <span class="status-label">Save Status:</span>
+                                    <span class="status-value" id="company-save-status">Not Saved</span>
+                                </div>
+                                <div class="status-item saved-path-item" id="company-saved-path-item" style="display: none;">
+                                    <span class="status-label">Saved Path:</span>
+                                    <span class="status-value saved-path" id="company-saved-path"></span>
                                 </div>
                             </div>
-                        </div>
-                    </div>
-                </div>
 
-                <!-- Build Results -->
-                <div class="build-results" id="build-results" style="display: none;">
-                    <div class="results-card">
-                        <h3>Knowledge Base Build Results</h3>
-                        <div class="results-content" id="results-content">
-                            <!-- Results will be populated here -->
+                            <div class="document-list" id="company-documents">
+                                <!-- Documents will be populated here -->
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -192,29 +233,46 @@
         </main>
     </div>
 
-    <!-- Processing Modal -->
+    <!-- Processing Status Modal -->
     <div class="modal hidden" id="processing-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Building Knowledge Base</h3>
+                <h3>Building & Saving Knowledge Base</h3>
             </div>
             <div class="modal-body">
                 <div class="processing-info">
-                    <div class="processing-icon" id="processing-icon">⬆️</div>
+                    <div class="processing-icon" id="processing-icon">🏗️</div>
                     <div class="processing-text">
-                        <h4 id="processing-section">General Documents</h4>
-                        <p id="processing-status">Uploading files to API...</p>
+                        <h4 id="processing-title">Processing Documents</h4>
+                        <p id="processing-status">Building knowledge base...</p>
                     </div>
                 </div>
                 <div class="progress-bar">
                     <div class="progress-fill" id="progress-fill"></div>
                 </div>
-                <div class="processing-details" id="processing-details">
-                    <!-- Real-time processing details will appear here -->
+                <div class="processing-details" id="processing-details"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Confirmation Modal -->
+    <div class="modal hidden" id="delete-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Delete Document</h3>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete this document? This action cannot be undone.</p>
+                <div class="modal-actions">
+                    <button class="btn btn--outline" id="cancel-delete">Cancel</button>
+                    <button class="btn btn--primary" id="confirm-delete">Delete Document</button>
                 </div>
             </div>
         </div>
     </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
 
     <script src="app.js"></script>
 </body>
