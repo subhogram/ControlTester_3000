@@ -1,4 +1,5 @@
-// Enhanced AI Agent Document Management Application with Fixed Error Handling
+// Complete AI Document Management & Assessment System
+// Enhanced with vectorstore detection, assessment functionality, and PDF generation
 
 class DebugConsole {
     static instance = null;
@@ -134,6 +135,135 @@ class DocumentAPI {
         }
     }
     
+    // Vectorstore Detection Method
+    static async checkExistingVectorstores() {
+        const debug = DebugConsole.getInstance();
+        debug.log('API: Checking for existing vectorstores...');
+        
+        const result = {
+            general: { exists: false, path: null, vector_count: 0, last_modified: null },
+            company: { exists: false, path: null, vector_count: 0, last_modified: null }
+        };
+        
+        try {
+            // Get available models for testing vectorstore loading
+            const models = await this.getModels();
+            const testModel = models.length > 0 ? models[0] : 'llama2';
+            
+            // Check both vectorstore paths
+            const checks = [
+                { type: 'general', path: 'saved_global_vectorstore', kb_type: 'global' },
+                { type: 'company', path: 'saved_company_vectorstore', kb_type: 'company' }
+            ];
+            
+            for (const check of checks) {
+                try {
+                    debug.log(`API: Checking ${check.type} vectorstore at ${check.path}`);
+                    
+                    const formData = new FormData();
+                    formData.append('dir_path', check.path);
+                    formData.append('kb_type', check.kb_type);
+                    formData.append('model_name', testModel);
+                    
+                    const response = await fetch(`${this.baseUrl}/load-vectorstore`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.success) {
+                            result[check.type] = {
+                                exists: true,
+                                path: check.path,
+                                vector_count: data.ntotal || 0,
+                                last_modified: new Date().toISOString()
+                            };
+                            debug.log(`API: Found ${check.type} vectorstore with ${data.ntotal || 0} vectors`);
+                        }
+                    } else {
+                        debug.log(`API: No ${check.type} vectorstore found (${response.status})`);
+                    }
+                } catch (error) {
+                    debug.log(`API: Error checking ${check.type} vectorstore:`, error.message);
+                }
+            }
+            
+            debug.log('API: Vectorstore check completed', result);
+            return result;
+            
+        } catch (error) {
+            debug.error('API: Failed to check vectorstores', error);
+            
+            // Return mock data for demo when API is unavailable
+            debug.log('API: Using mock vectorstore data for demo');
+            return {
+                general: {
+                    exists: Math.random() > 0.5,
+                    path: 'saved_global_vectorstore',
+                    vector_count: Math.floor(Math.random() * 300) + 50,
+                    last_modified: new Date(Date.now() - Math.random() * 86400000 * 7).toISOString()
+                },
+                company: {
+                    exists: Math.random() > 0.3,
+                    path: 'saved_company_vectorstore',
+                    vector_count: Math.floor(Math.random() * 500) + 100,
+                    last_modified: new Date(Date.now() - Math.random() * 86400000 * 3).toISOString()
+                }
+            };
+        }
+    }
+    
+    // Assessment API
+    static async runAssessment(files) {
+        const debug = DebugConsole.getInstance();
+        debug.log(`API: Running assessment`);
+        const sessionModel = sessionStorage.getItem('selectedModel');
+        try {
+            //API call for assessment
+            const formData = new FormData();
+            formData.append('selected_model', sessionModel);
+            formData.append('max_workers', '4');
+
+            // Add files
+            Array.from(files).forEach(file => {
+                formData.append('evidence_files', file);
+            });
+            
+            // Simulate processing delay
+            //await new Promise(resolve => setTimeout(resolve, 1000));
+
+            const response = await fetch(`${this.baseUrl}/assess-evidence`, {
+                method: 'POST',
+                body: formData
+            });
+
+            debug.log(`Evidence_Assessment API: Assessment request response status: ${response.status}`);   
+            
+            if (!response.ok) {
+                const errorText = await response.text();
+                debug.error(`API: Build request failed (${response.status})`, errorText);
+                throw new Error(`Build failed (${response.status}): ${errorText}`);
+            }
+
+            const result = await response.json();
+            debug.log('Evidence_Assessment API: Assessment response received', result);
+           
+            if (!result.success) {
+                const error = new Error(result.error_details || result.message || 'Build failed');
+                debug.error('API: Build reported failure', error);
+                throw error;
+            }
+
+            debug.log('Evidence_Assessment API: Knowledge base build completed successfully');
+            return result;
+            
+        } catch (error) {
+            debug.error('Evidence_Assessment API: Assessment failed', error);
+            throw error;
+        }
+    }
+    
     static async buildKnowledgeBase(files, kbType) {
         const debug = DebugConsole.getInstance();
         const sessionModel = sessionStorage.getItem('selectedModel');
@@ -166,7 +296,7 @@ class DocumentAPI {
                 body: formData
             });
             
-            debug.log(`API: Build request response status: ${response.status}`);
+            debug.log(`Build_Knowledge_Base API: Build request response status: ${response.status}`);
             
             if (!response.ok) {
                 const errorText = await response.text();
@@ -175,7 +305,7 @@ class DocumentAPI {
             }
             
             const result = await response.json();
-            debug.log('API: Build response received', result);
+            debug.log('Build_Knowledge_Base API: Build response received', result);
             
             if (!result.success) {
                 const error = new Error(result.error_details || result.message || 'Build failed');
@@ -191,7 +321,6 @@ class DocumentAPI {
             
             if (error.message.includes('fetch')) {
                 debug.log('API: Simulating build process for testing');
-                // Simulate successful build for testing when API is not available
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 const mockResult = {
                     success: true,
@@ -252,7 +381,6 @@ class DocumentAPI {
             
             if (error.message.includes('fetch')) {
                 debug.log('API: Simulating save process for testing');
-                // Simulate successful save for testing when API is not available
                 await new Promise(resolve => setTimeout(resolve, 1000));
                 const mockResult = {
                     success: true,
@@ -284,6 +412,123 @@ class DocumentAPI {
     }
 }
 
+// PDF Report Generator using jsPDF
+class PDFGenerator {
+    static generateAssessmentReport(assessmentData) {
+        const debug = DebugConsole.getInstance();
+        debug.log('PDF: Generating assessment report', assessmentData);
+        
+        try {
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF();
+            
+            // Header
+            doc.setFontSize(20);
+            doc.setTextColor(33, 128, 141); // Teal color
+            doc.text('Document Assessment Report', 20, 30);
+            
+            // Document info
+            doc.setFontSize(12);
+            doc.setTextColor(0, 0, 0);
+            doc.text(`Document: ${assessmentData.file_name}`, 20, 50);
+            doc.text(`Assessment Type: ${assessmentData.assessment_type}`, 20, 60);
+            doc.text(`Generated: ${new Date(assessmentData.generated_at).toLocaleString()}`, 20, 70);
+            
+            // Overall Score
+            doc.setFontSize(16);
+            doc.setTextColor(33, 128, 141);
+            doc.text('Overall Assessment Score', 20, 95);
+            
+            doc.setFontSize(24);
+            const scoreColor = assessmentData.results.overall_score >= 85 ? [34, 197, 94] : 
+                             assessmentData.results.overall_score >= 70 ? [245, 158, 11] : [239, 68, 68];
+            doc.setTextColor(...scoreColor);
+            doc.text(`${assessmentData.results.overall_score}%`, 20, 110);
+            
+            // Detailed Scores
+            doc.setFontSize(14);
+            doc.setTextColor(33, 128, 141);
+            doc.text('Detailed Scores', 20, 135);
+            
+            doc.setFontSize(12);
+            doc.setTextColor(0, 0, 0);
+            let yPos = 150;
+            doc.text(`Structure Score: ${assessmentData.results.structure_score}%`, 20, yPos);
+            doc.text(`Content Score: ${assessmentData.results.content_score}%`, 20, yPos + 15);
+            doc.text(`Format Score: ${assessmentData.results.format_score}%`, 20, yPos + 30);
+            
+            // Findings
+            yPos += 60;
+            doc.setFontSize(14);
+            doc.setTextColor(33, 128, 141);
+            doc.text('Key Findings', 20, yPos);
+            
+            doc.setFontSize(10);
+            doc.setTextColor(0, 0, 0);
+            yPos += 15;
+            
+            assessmentData.results.findings.forEach((finding, index) => {
+                const levelColors = {
+                    success: [34, 197, 94],
+                    warning: [245, 158, 11],
+                    error: [239, 68, 68],
+                    info: [59, 130, 246]
+                };
+                
+                doc.setTextColor(...(levelColors[finding.level] || [0, 0, 0]));
+                doc.text(`• ${finding.category}: `, 20, yPos);
+                doc.setTextColor(0, 0, 0);
+                const lines = doc.splitTextToSize(finding.message, 150);
+                doc.text(lines, 55, yPos);
+                yPos += lines.length * 12;
+            });
+            
+            // Recommendations
+            if (yPos > 250) {
+                doc.addPage();
+                yPos = 30;
+            } else {
+                yPos += 20;
+            }
+            
+            doc.setFontSize(14);
+            doc.setTextColor(33, 128, 141);
+            doc.text('Recommendations', 20, yPos);
+            
+            doc.setFontSize(10);
+            doc.setTextColor(0, 0, 0);
+            yPos += 15;
+            
+            assessmentData.results.recommendations.forEach((recommendation, index) => {
+                const lines = doc.splitTextToSize(`${index + 1}. ${recommendation}`, 170);
+                doc.text(lines, 20, yPos);
+                yPos += lines.length * 12;
+            });
+            
+            // Footer
+            const pageCount = doc.internal.getNumberOfPages();
+            for (let i = 1; i <= pageCount; i++) {
+                doc.setPage(i);
+                doc.setFontSize(8);
+                doc.setTextColor(128, 128, 128);
+                doc.text(`Page ${i} of ${pageCount}`, 20, 285);
+                doc.text('Generated by AI Document Management System', 120, 285);
+            }
+            
+            // Save the PDF
+            const fileName = `assessment-report-${assessmentData.assessment_id}.pdf`;
+            doc.save(fileName);
+            
+            debug.log(`PDF: Report generated and downloaded as ${fileName}`);
+            return fileName;
+            
+        } catch (error) {
+            debug.error('PDF: Failed to generate report', error);
+            throw error;
+        }
+    }
+}
+
 class UIManager {
     constructor() {
         this.processing = {};
@@ -301,6 +546,13 @@ class UIManager {
             'text/markdown',
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
         ];
+        // Track existing vectorstores
+        this.existingVectorstores = { general: null, company: null };
+        
+        // Assessment state
+        this.assessmentFile = null;
+        this.lastAssessmentResult = null;
+        this.isAssessing = false;
     }
     
     async init() {
@@ -327,10 +579,57 @@ class UIManager {
         await this.loadModels();
         await this.checkAPIConnection();
         
+        // Check for existing vectorstores after API connection
+        await this.checkForExistingVectorstores();
+        
         this.updateModelDisplay();
         this.updateAllStatuses();
         
         this.debug.log('UI: Application setup completed');
+    }
+    
+    // Main vectorstore checking method called during initialization
+    async checkForExistingVectorstores() {
+        this.debug.log('UI: Checking for existing vectorstores during initialization');
+        
+        try {
+            const vectorstoreInfo = await DocumentAPI.checkExistingVectorstores();
+            this.existingVectorstores = vectorstoreInfo;
+            
+            // Update UI for sections with existing vectorstores
+            ['general', 'company'].forEach(sectionId => {
+                const info = vectorstoreInfo[sectionId];
+                
+                if (info && info.exists) {
+                    this.debug.log(`UI: Found existing ${sectionId} vectorstore with ${info.vector_count} vectors`);
+                    
+                    // Update build and save status
+                    this.updateStatus(sectionId, 'built', `Built successfully (${info.vector_count || 0} vectors)`);
+                    this.updateStatus(sectionId, 'saved', 'Saved to disk');
+                    
+                    // Show saved path
+                    this.showSavedPath(sectionId, info.path, info.vector_count);
+                    
+                    // Update card status to show success
+                    this.updateCardStatus(sectionId, 'success', 'Previously built & saved');
+                    
+                    // Show notification
+                    const lastModified = info.last_modified ? 
+                        new Date(info.last_modified).toLocaleDateString() : 'recently';
+                    this.showToast(
+                        `Found existing ${sectionId} vectorstore (${info.vector_count || 0} vectors, saved ${lastModified})`, 
+                        'success',
+                        4000
+                    );
+                } else {
+                    this.debug.log(`UI: No existing ${sectionId} vectorstore found`);
+                }
+            });
+            
+        } catch (error) {
+            this.debug.error('UI: Failed to check existing vectorstores', error);
+            // Don't show error to user as this is not critical
+        }
     }
     
     setupDebugConsole() {
@@ -380,13 +679,13 @@ class UIManager {
     updateCardStatus(sectionId, statusType, message) {
         const statusContainer = document.getElementById(`${sectionId}-status`);
         if (!statusContainer) {
-            console.error(`Status container not found: ${sectionId}-status`);
+            this.debug.error(`Status container not found: ${sectionId}-status`);
             return;
         }
         
         const statusElement = statusContainer.querySelector('.status');
         if (!statusElement) {
-            console.error(`Status element not found in: ${sectionId}-status`);
+            this.debug.error(`Status element not found in: ${sectionId}-status`);
             return;
         }
         
@@ -396,9 +695,8 @@ class UIManager {
         // Update classes
         statusElement.className = `status status--${statusType}`;
         
-        console.log(`Updated ${sectionId} status: ${message} (${statusType})`);
+        this.debug.log(`Updated ${sectionId} card status: ${message} (${statusType})`);
     }
-
     
     updateAPIStatus(isHealthy) {
         const statusIndicator = document.getElementById('status-indicator');
@@ -591,14 +889,344 @@ class UIManager {
         this.setupDragAndDrop('general-upload-area', 'general');
         this.setupDragAndDrop('company-upload-area', 'company');
         
+        // Assessment drag and drop
+        this.setupAssessmentDragAndDrop();
+        
         // Build buttons
         this.setupBuildButtons();
+        
+        // Assessment buttons
+        this.setupAssessmentButtons();
         
         // Modal handlers
         this.setupModalHandlers();
         
-        // Browse buttons - setup after DOM is ready
+        // Browse buttons
         this.setupBrowseButtons();
+    }
+    
+    // Assessment event handlers
+    setupAssessmentDragAndDrop() {
+        const area = document.getElementById('assessment-upload-area');
+        if (!area) return;
+        
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            area.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+            });
+        });
+        
+        area.addEventListener('dragover', () => {
+            area.classList.add('drag-over');
+        });
+        
+        area.addEventListener('dragleave', (e) => {
+            if (!area.contains(e.relatedTarget)) {
+                area.classList.remove('drag-over');
+            }
+        });
+        
+        area.addEventListener('drop', (e) => {
+            area.classList.remove('drag-over');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                this.handleAssessmentFileSelection(files[0]);
+            }
+        });
+        
+        area.addEventListener('click', (e) => {
+            if (e.target.classList.contains('upload-link') || e.target.closest('.upload-link')) {
+                return;
+            }
+            const fileInput = document.getElementById('assessment-file-input');
+            if (fileInput) {
+                fileInput.click();
+            }
+        });
+    }
+    
+    setupAssessmentButtons() {
+        // Assessment file input
+        const assessmentFileInput = document.getElementById('assessment-file-input');
+        if (assessmentFileInput) {
+            assessmentFileInput.addEventListener('change', (e) => {
+                if (e.target.files.length > 0) {
+                    this.handleAssessmentFileSelection(e.target.files[0]);
+                }
+                e.target.value = '';
+            });
+        }
+        
+        // Assessment browse button
+        const assessmentUploadArea = document.getElementById('assessment-upload-area');
+        if (assessmentUploadArea) {
+            const browseBtn = assessmentUploadArea.querySelector('.upload-link');
+            if (browseBtn) {
+                browseBtn.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.debug.log('UI: Assessment browse button clicked');
+                    assessmentFileInput.click();
+                });
+            }
+        }
+        
+        // Remove file button
+        const removeFileBtn = document.getElementById('assessment-remove-file');
+        if (removeFileBtn) {
+            removeFileBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.removeAssessmentFile();
+            });
+        }
+        
+        // Run assessment button
+        const runAssessmentBtn = document.getElementById('run-assessment-btn');
+        if (runAssessmentBtn) {
+            runAssessmentBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                if (!runAssessmentBtn.disabled && this.assessmentFile) {
+                    this.runAssessment();
+                }
+            });
+        }
+        
+        // Download report button
+        const downloadReportBtn = document.getElementById('download-report-btn');
+        if (downloadReportBtn) {
+            downloadReportBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                this.downloadAssessmentReport();
+            });
+        }
+    }
+    
+    handleAssessmentFileSelection(file) {
+        this.debug.log('UI: Assessment file selected', { name: file.name, size: file.size });
+        
+        // Validate file
+        const maxSize = 25 * 1024 * 1024; // 25MB
+        if (file.size > maxSize) {
+            this.showToast('File is too large. Maximum size is 25MB.', 'error');
+            return;
+        }
+        
+        const allowedExtensions = ['.pdf', '.txt', '.docx', '.md', '.xlsx'];
+        const extension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
+        if (!allowedExtensions.includes(extension)) {
+            this.showToast('Unsupported file format. Please use PDF, TXT, DOCX, MD, or XLSX.', 'error');
+            return;
+        }
+        
+        // Store file and update UI
+        this.assessmentFile = file;
+        this.updateAssessmentFileDisplay();
+        this.updateAssessmentStatus();
+        
+        this.showToast(`File "${file.name}" uploaded successfully`, 'success');
+    }
+    
+    updateAssessmentFileDisplay() {
+        const uploadArea = document.getElementById('assessment-upload-area');
+        const fileDisplay = document.getElementById('assessment-file-display');
+        const fileName = document.getElementById('assessment-file-name');
+        const fileDetails = document.getElementById('assessment-file-details');
+        const fileIcon = document.getElementById('assessment-file-icon');
+        const fileStatus = document.getElementById('assessment-file-status');
+        
+        if (this.assessmentFile) {
+            // Hide upload area, show file display
+            if (uploadArea) uploadArea.style.display = 'none';
+            if (fileDisplay) fileDisplay.style.display = 'block';
+            
+            // Update file info
+            if (fileName) fileName.textContent = this.assessmentFile.name;
+            if (fileDetails) {
+                const size = this.formatFileSize(this.assessmentFile.size);
+                fileDetails.textContent = `${size} • Uploaded ${new Date().toLocaleDateString()}`;
+            }
+            if (fileIcon) fileIcon.textContent = this.getFileIcon(this.assessmentFile.name);
+            if (fileStatus) fileStatus.textContent = 'File ready for assessment';
+        } else {
+            // Show upload area, hide file display
+            if (uploadArea) uploadArea.style.display = 'block';
+            if (fileDisplay) fileDisplay.style.display = 'none';
+            if (fileStatus) fileStatus.textContent = 'No file uploaded';
+        }
+    }
+    
+    removeAssessmentFile() {
+        this.assessmentFile = null;
+        this.lastAssessmentResult = null;
+        this.updateAssessmentFileDisplay();
+        this.updateAssessmentStatus();
+        this.showToast('File removed', 'info');
+        this.debug.log('UI: Assessment file removed');
+    }
+    
+    updateAssessmentStatus() {
+        const runBtn = document.getElementById('run-assessment-btn');
+        const hint = document.getElementById('assessment-hint');
+        const progressStatus = document.getElementById('assessment-progress-status');
+        const reportStatus = document.getElementById('report-status');
+        const reportDownloadItem = document.getElementById('report-download-item');
+        const assessmentStatus = document.getElementById('assessment-status');
+        
+        if (this.isAssessing) {
+            if (runBtn) {
+                runBtn.disabled = true;
+                runBtn.textContent = 'Running Assessment...';
+            }
+            if (hint) hint.textContent = 'Assessment in progress...';
+            if (progressStatus) progressStatus.textContent = 'Running assessment...';
+            if (assessmentStatus) {
+                const statusEl = assessmentStatus.querySelector('.status');
+                if (statusEl) {
+                    statusEl.textContent = 'Assessment in progress...';
+                    statusEl.className = 'status status--warning';
+                }
+            }
+        } else if (this.assessmentFile) {
+            if (runBtn) {
+                runBtn.disabled = false;
+                runBtn.innerHTML = '📊 Run Assessment';
+            }
+            if (hint) hint.textContent = 'Ready to run assessment';
+            if (progressStatus) progressStatus.textContent = 'Ready';
+            if (assessmentStatus) {
+                const statusEl = assessmentStatus.querySelector('.status');
+                if (statusEl) {
+                    statusEl.textContent = 'Ready for assessment';
+                    statusEl.className = 'status status--info';
+                }
+            }
+        } else {
+            if (runBtn) {
+                runBtn.disabled = true;
+                runBtn.innerHTML = '📊 Run Assessment';
+            }
+            if (hint) hint.textContent = 'Upload a file to enable assessment';
+            if (progressStatus) progressStatus.textContent = 'No file uploaded';
+            if (assessmentStatus) {
+                const statusEl = assessmentStatus.querySelector('.status');
+                if (statusEl) {
+                    statusEl.textContent = 'Upload a document to begin';
+                    statusEl.className = 'status status--info';
+                }
+            }
+        }
+        
+        // Report status
+        if (this.lastAssessmentResult) {
+            if (reportStatus) reportStatus.textContent = 'Report ready';
+            if (reportDownloadItem) reportDownloadItem.style.display = 'block';
+        } else {
+            if (reportStatus) reportStatus.textContent = 'Not generated';
+            if (reportDownloadItem) reportDownloadItem.style.display = 'none';
+        }
+    }
+    
+    async runAssessment() {
+        if (!this.assessmentFile || this.isAssessing) return;
+        
+        this.debug.log('UI: Starting assessment process');
+        this.isAssessing = true;
+        this.updateAssessmentStatus();        
+       
+        // Show progress card
+        this.showAssessmentProgress();
+        
+        try {            
+            
+            // Run actual assessment
+            const result = await DocumentAPI.runAssessment([this.assessmentFile]);
+            this.lastAssessmentResult = result;
+            
+            // Hide progress card
+            this.hideAssessmentProgress();
+            
+            // Update status
+            this.isAssessing = false;
+            this.updateAssessmentStatus();
+            
+            // Update card status
+            const assessmentStatus = document.getElementById('assessment-status');
+            if (assessmentStatus) {
+                const statusEl = assessmentStatus.querySelector('.status');
+                if (statusEl) {
+                    statusEl.textContent = `Assessment complete (Score: ${result.results.overall_score}%)`;
+                    statusEl.className = 'status status--success';
+                }
+            }
+            
+            this.showToast(`Assessment completed with score: ${result.results.overall_score}%`, 'success');
+            
+        } catch (error) {
+            this.debug.error('UI: Assessment failed', error);
+            this.isAssessing = false;
+            this.hideAssessmentProgress();
+            this.updateAssessmentStatus();
+            this.showToast(`Assessment failed: ${error.message}`, 'error');
+        }
+    }
+    
+    showAssessmentProgress() {
+        const progressCard = document.getElementById('assessment-progress-card');
+        if (progressCard) {
+            progressCard.style.display = 'block';
+            progressCard.scrollIntoView({ behavior: 'smooth' });
+        }
+    }
+    
+    hideAssessmentProgress() {
+        const progressCard = document.getElementById('assessment-progress-card');
+        if (progressCard) {
+            setTimeout(() => {
+                progressCard.style.display = 'none';
+            }, 2000);
+        }
+    }
+    
+    updateAssessmentProgress(progress, title, description) {
+        const progressFill = document.getElementById('assessment-progress-fill');
+        const progressTitle = document.getElementById('assessment-progress-title');
+        const progressDescription = document.getElementById('assessment-progress-description');
+        const steps = document.querySelectorAll('.progress-step');
+        
+        if (progressFill) progressFill.style.width = `${progress}%`;
+        if (progressTitle) progressTitle.textContent = title;
+        if (progressDescription) progressDescription.textContent = description;
+        
+        // Update step indicators
+        steps.forEach((step, index) => {
+            const stepProgress = (index + 1) * 25;
+            if (progress >= stepProgress) {
+                step.classList.add('completed');
+                step.classList.remove('active');
+            } else if (progress >= stepProgress - 25) {
+                step.classList.add('active');
+                step.classList.remove('completed');
+            } else {
+                step.classList.remove('active', 'completed');
+            }
+        });
+    }
+    
+    downloadAssessmentReport() {
+        if (!this.lastAssessmentResult) {
+            this.showToast('No assessment report available', 'error');
+            return;
+        }
+        
+        try {
+            const fileName = PDFGenerator.generateAssessmentReport(this.lastAssessmentResult);
+            this.showToast(`Report downloaded as ${fileName}`, 'success');
+            this.debug.log('UI: Assessment report downloaded', fileName);
+        } catch (error) {
+            this.debug.error('UI: Failed to download report', error);
+            this.showToast(`Failed to download report: ${error.message}`, 'error');
+        }
     }
     
     setupFileInputs() {
@@ -702,23 +1330,21 @@ class UIManager {
         this.processing[sectionId] = true;
         this.updateBuildButton(sectionId, true);
         
-        // Show processing modal with progress
+        // Show processing modal
         this.showProcessingModal(sectionId, this.selectedModel);
         
         try {
             // Phase 1: Build Knowledge Base
             this.debug.log(`UI: Starting build for ${sectionId}...`);
-            this.updateCardStatus(sectionId, 'processing', 'Building knowledge base...');
+            this.updateCardStatus(sectionId, 'warning', 'Building knowledge base...');
             this.updateStatus(sectionId, 'building', 'Building knowledge base...');
             this.updateProcessingModal('Building knowledge base...', '⚙️', 30);
             
-            // Create files array with File objects
             const fileObjects = this.files[sectionId].map(doc => doc.file || new File(['test content'], doc.name, { type: doc.type }));
             const buildResult = await this.callBuildAPI(fileObjects, kbType);
             
             this.debug.log(`UI: Build completed for ${sectionId}:`, buildResult);
             
-            // Validate build result
             if (!buildResult || !buildResult.success) {
                 throw new Error('Build completed but reported failure');
             }
@@ -727,8 +1353,7 @@ class UIManager {
             this.updateStatus(sectionId, 'built', `Built successfully (${vectorCount} vectors)`);
             this.updateProcessingModal('Knowledge base built successfully', '✅', 60);
             
-            // Small delay to ensure vectorstore is cached on server
-            this.debug.log('UI: Waiting for vectorstore to be cached...');
+            // Small delay to ensure vectorstore is cached
             await new Promise(resolve => setTimeout(resolve, 1000));
             
             // Phase 2: Save Vectorstore
@@ -740,17 +1365,23 @@ class UIManager {
             
             this.debug.log(`UI: Save completed for ${sectionId}:`, saveResult);
             
-            // Validate save result
             if (!saveResult || !saveResult.success) {
                 throw new Error('Save completed but reported failure');
             }
             
             // Success
             this.updateStatus(sectionId, 'completed', 'Built & saved successfully');
+            this.updateCardStatus(sectionId, 'success', 'Built & saved successfully');
             this.showSavedPath(sectionId, saveResult.path || savePath, vectorCount);
             this.updateProcessingModal('Knowledge base built and saved successfully!', '🎉', 100);
-            this.updateCardStatus(sectionId, 'success', 'Built & saved successfully');
-
+            
+            // Update vectorstore tracking
+            this.existingVectorstores[sectionId] = {
+                exists: true,
+                path: saveResult.path || savePath,
+                vector_count: vectorCount,
+                last_modified: new Date().toISOString()
+            };
             
             // Hide modal after showing success
             setTimeout(() => {
@@ -761,8 +1392,8 @@ class UIManager {
         } catch (error) {
             this.debug.error(`UI: Build/Save failed for ${sectionId}:`, error);
             this.updateStatus(sectionId, 'error', `Failed: ${error.message}`);
-            this.hideModal('processing-modal');
             this.updateCardStatus(sectionId, 'error', `Failed: ${error.message}`);
+            this.hideModal('processing-modal');
             this.showToast(`${sectionId} failed: ${error.message}`, 'error');
         } finally {
             this.processing[sectionId] = false;
@@ -858,6 +1489,11 @@ class UIManager {
                 saveStatus.textContent = 'Save failed';
                 saveStatus.className = 'status-value error';
             }
+        } else if (statusType === 'saved') {
+            if (saveStatus) {
+                saveStatus.textContent = message;
+                saveStatus.className = 'status-value saved';
+            }
         }
     }
     
@@ -872,7 +1508,7 @@ class UIManager {
         } else {
             btn.classList.remove('loading');
             btn.innerHTML = '🏗️ Build & Save Knowledge Base';
-            this.updateAllStatuses(); // This will set proper disabled state
+            this.updateAllStatuses();
         }
     }
     
@@ -898,22 +1534,34 @@ class UIManager {
             const hasFiles = this.files[section].length > 0;
             const hasModel = this.selectedModel !== null;
             const isProcessing = this.processing[section];
+            const hasExistingVectorstore = this.existingVectorstores[section]?.exists;
             
             let shouldDisable = true;
             let hintText = '';
             
             if (!hasModel) {
                 shouldDisable = true;
-                hintText = 'Select a model above to enable building';
-            } else if (!hasFiles) {
+                if (hasExistingVectorstore) {
+                    hintText = 'Select a model to rebuild or use existing vectorstore';
+                } else {
+                    hintText = 'Select a model above to enable building';
+                    this.updateCardStatus(section, 'info', 'Select model to enable building');
+                }
+            } else if (!hasFiles && !hasExistingVectorstore) {
                 shouldDisable = true;
                 hintText = 'Upload documents to enable building';
+                this.updateCardStatus(section, 'warning', 'Upload files to build');
             } else if (isProcessing) {
                 shouldDisable = true;
                 hintText = 'Processing...';
+            } else if (hasExistingVectorstore && !hasFiles) {
+                shouldDisable = true;
+                hintText = 'Upload new documents to rebuild';
             } else {
                 shouldDisable = false;
-                hintText = `Ready to build with ${this.selectedModel}`;
+                const action = hasExistingVectorstore ? 'rebuild' : 'build';
+                hintText = `Ready to ${action} with ${this.selectedModel}`;
+                this.updateCardStatus(section, 'info', `Ready to ${action}`);
             }
             
             btn.disabled = shouldDisable;
@@ -921,6 +1569,9 @@ class UIManager {
         });
         
         this.updateDocumentCounts();
+        
+        // Update assessment status
+        this.updateAssessmentStatus();
     }
     
     setupDragAndDrop(areaId, section) {
@@ -1062,7 +1713,7 @@ class UIManager {
             type: file.type,
             section: section,
             uploadedAt: new Date().toISOString(),
-            file: file // Store actual file for API calls
+            file: file
         };
         
         this.files[section].push(document);
@@ -1095,7 +1746,7 @@ class UIManager {
         const documents = this.files[section];
         
         if (documents.length === 0) {
-            container.innerHTML = '<p style="text-align: center; color: var(--color-text-secondary); padding: var(--space-16);">No documents uploaded yet</p>';
+            container.innerHTML = '<p class="no-docs">No documents uploaded yet</p>';
             return;
         }
         
@@ -1300,3 +1951,17 @@ if (document.readyState === 'loading') {
         window.uiManager = uiManager; // For debugging
     })();
 }
+
+// Enhanced error handling for unhandled promise rejections
+window.addEventListener('unhandledrejection', (event) => {
+    const debug = DebugConsole.getInstance();
+    debug.error('Unhandled promise rejection:', event.reason);
+    console.error('Unhandled promise rejection:', event.reason);
+});
+
+// Enhanced error handling for general errors
+window.addEventListener('error', (event) => {
+    const debug = DebugConsole.getInstance();
+    debug.error('Global error:', event.error);
+    console.error('Global error:', event.error);
+});

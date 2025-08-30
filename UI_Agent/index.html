@@ -3,123 +3,163 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Agent - Document Management (Fixed)</title>
+    <title>AI Document Management & Assessment System</title>
     <link rel="stylesheet" href="style.css">
+    <!-- jsPDF for PDF generation -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
-    <div class="app-container">
-        <!-- Debug Console Toggle -->
-        <button class="debug-toggle" id="debug-toggle">🐛 Debug Console</button>
-        
-        <!-- Debug Panel -->
-        <div class="debug-panel hidden" id="debug-panel">
-            <div class="debug-header">
-                <h3>Debug Console</h3>
-                <button class="debug-close" id="debug-close">&times;</button>
-            </div>
-            <div class="debug-content">
-                <div class="debug-controls">
-                    <button class="btn btn--sm btn--outline" id="debug-clear">Clear</button>
-                    <button class="btn btn--sm btn--outline" id="debug-download">Download Log</button>
-                </div>
-                <div class="debug-output" id="debug-output"></div>
-            </div>
-        </div>
+    <!-- Debug Console Toggle -->
+    <button class="debug-toggle" id="debug-toggle" title="Toggle Debug Console">
+        🐛 Debug
+    </button>
 
+    <!-- Debug Panel -->
+    <div class="debug-panel hidden" id="debug-panel">
+        <div class="debug-header">
+            <h3>Debug Console</h3>
+            <button class="debug-close" id="debug-close">&times;</button>
+        </div>
+        <div class="debug-content">
+            <div class="debug-controls">
+                <button class="btn btn--sm btn--secondary" id="debug-clear">Clear</button>
+                <button class="btn btn--sm btn--secondary" id="debug-download">Download</button>
+            </div>
+            <div class="debug-output" id="debug-output"></div>
+        </div>
+    </div>
+
+    <div class="app-container">
         <!-- Sidebar Navigation -->
-        <nav class="sidebar">
+        <aside class="sidebar">
             <div class="sidebar-header">
-                <h2 class="sidebar-title">AI Agent</h2>
-                <div class="api-status" id="api-status">
+                <h1 class="sidebar-title">AI Agent</h1>
+                <p class="sidebar-description">
+                    Document Management & Assessment System
+                </p>
+                
+                <!-- API Status -->
+                <div class="api-status">
                     <span class="status-indicator" id="status-indicator">🔴</span>
                     <span class="status-text" id="status-text">API Disconnected</span>
                 </div>
             </div>
-            <ul class="sidebar-nav">
-                <li class="nav-item">
-                    <button class="nav-link active" data-tab="document-management">
-                        <span class="nav-icon">📄</span>
-                        <span class="nav-text">Document Management</span>
-                    </button>
-                </li>
-                <li class="nav-item">
-                    <button class="nav-link" data-tab="chat">
-                        <span class="nav-icon">💬</span>
-                        <span class="nav-text">Chat</span>
-                    </button>
-                </li>
-                <li class="nav-item">
-                    <button class="nav-link" data-tab="settings">
-                        <span class="nav-icon">⚙️</span>
-                        <span class="nav-text">Settings</span>
-                    </button>
-                </li>
-            </ul>
-        </nav>
+            
+            <nav>
+                <ul class="sidebar-nav">
+                    <li class="nav-item">
+                        <button class="nav-link active" data-tab="documents">
+                            <span class="nav-icon">📄</span>
+                            <span class="nav-text">Documents</span>
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-tab="assessment">
+                            <span class="nav-icon">📊</span>
+                            <span class="nav-text">Assessment</span>
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-tab="chat">
+                            <span class="nav-icon">💬</span>
+                            <span class="nav-text">Chat</span>
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-tab="settings">
+                            <span class="nav-icon">⚙️</span>
+                            <span class="nav-text">Settings</span>
+                        </button>
+                    </li>
+                </ul>
+            </nav>
+        </aside>
 
         <!-- Main Content -->
         <main class="main-content">
-            <!-- Document Management Tab -->
-            <div id="document-management" class="tab-content active">
+            <!-- Documents Tab -->
+            <div id="documents" class="tab-content active">
+                <div class="content-header">
+                    <h1>Document Management</h1>
+                    <p class="content-description">
+                        Upload documents and build knowledge bases for AI-powered document retrieval
+                    </p>
+                </div>
+
                 <!-- Model Selection Header -->
                 <div class="model-selection-header">
-                    <div class="content-header">
-                        <h1>Document Management</h1>
-                        <p class="content-description">Upload documents and build knowledge bases with enhanced error handling and debugging</p>
+                    <div>
+                        <h2>Model Configuration</h2>
+                        <p>Select and configure your Ollama model for document processing</p>
                     </div>
-                    
+
                     <div class="model-selector-container">
-                        <!-- Model Selection Dropdown -->
-                        <div class="model-selector" id="model-selector">
-                            <label class="form-label">Select Ollama Model for Session:</label>
-                            <select class="form-control" id="session-model-select">
-                                <option value="">Loading models...</option>
-                            </select>
-                            <div class="model-validation" id="model-validation"></div>
-                        </div>
-                        
-                        <!-- Selected Model Display -->
-                        <div class="selected-model-display" id="selected-model-display" style="display: none;">
-                            <div class="selected-model-info">
-                                <span class="model-label">Using model:</span>
-                                <strong class="model-name" id="selected-model-name"></strong>
-                                <span class="model-status">(locked for session)</span>
+                        <!-- Model Selection -->
+                        <div id="model-selector" class="model-selector">
+                            <div class="form-group">
+                                <label class="form-label" for="session-model-select">Select Ollama Model</label>
+                                <select id="session-model-select" class="form-control">
+                                    <option value="">Loading models...</option>
+                                </select>
+                                <div id="model-validation"></div>
                             </div>
-                            <button class="btn btn--outline btn--sm change-model-btn" id="change-model-btn">
+                        </div>
+
+                        <!-- Selected Model Display -->
+                        <div id="selected-model-display" class="selected-model-display" style="display: none;">
+                            <div class="selected-model-info">
+                                <div>
+                                    <div class="model-label">Selected Model</div>
+                                    <div class="model-name" id="selected-model-name">llama2</div>
+                                    <div class="model-status">Locked for session</div>
+                                </div>
+                            </div>
+                            <button class="btn btn--sm btn--outline change-model-btn" id="change-model-btn">
                                 Change Model
                             </button>
                         </div>
                     </div>
                 </div>
 
+                <!-- Document Sections -->
                 <div class="document-sections">
                     <!-- General Documents Section -->
                     <div class="document-card">
                         <div class="card-header">
                             <div class="card-title-section">
                                 <h3 class="card-title">General Documents</h3>
-                                <span class="document-count" id="general-count">0 documents</span>
+                                <div class="document-count" id="general-count">0 documents</div>
                             </div>
                             <div class="card-status" id="general-status">
-                                <span class="status status--info">Select model to enable building</span>
+                                <div class="status status--info">Select a model above to enable building</div>
                             </div>
                         </div>
                         
                         <div class="card-body">
-                            <p class="card-description">Upload general documents for global knowledge base creation using Faiss vectorstore</p>
-                            
+                            <p class="card-description">
+                                Upload general documents for global knowledge base creation using Faiss vectorstore
+                            </p>
+
+                            <!-- Upload Area -->
                             <div class="upload-area" id="general-upload-area">
-                                <input type="file" id="general-file-input" multiple accept=".pdf,.txt,.docx,.md" style="display: none;">
                                 <div class="upload-content">
                                     <div class="upload-icon">📁</div>
                                     <p class="upload-text">
                                         <strong>Drag and drop files here</strong><br>
-                                        or <button class="upload-link">browse files</button>
+                                        or <button type="button" class="upload-link">browse files</button>
                                     </p>
                                     <p class="upload-info">Supported formats: PDF, TXT, DOCX, MD (Max 10MB each)</p>
                                 </div>
                             </div>
 
+                            <input type="file" id="general-file-input" multiple accept=".pdf,.txt,.docx,.md" style="display: none;">
+
+                            <!-- Document List -->
+                            <div class="document-list" id="general-documents">
+                                <p class="no-docs">No documents uploaded yet</p>
+                            </div>
+
+                            <!-- Build Section -->
                             <div class="build-section">
                                 <button class="btn btn--primary btn--full-width build-btn" id="general-build-btn" disabled>
                                     🏗️ Build & Save Knowledge Base
@@ -127,23 +167,20 @@
                                 <p class="build-hint" id="general-build-hint">Select a model above to enable building</p>
                             </div>
 
-                            <div class="status-display" id="general-status-display">
+                            <!-- Status Display -->
+                            <div class="status-display">
                                 <div class="status-item">
                                     <span class="status-label">Build Status:</span>
-                                    <span class="status-value" id="general-build-status">Select model to enable building</span>
+                                    <span class="status-value" id="general-build-status">No model selected</span>
                                 </div>
                                 <div class="status-item">
                                     <span class="status-label">Save Status:</span>
-                                    <span class="status-value" id="general-save-status">Not Saved</span>
+                                    <span class="status-value" id="general-save-status">Waiting...</span>
                                 </div>
                                 <div class="status-item saved-path-item" id="general-saved-path-item" style="display: none;">
                                     <span class="status-label">Saved Path:</span>
-                                    <span class="status-value saved-path" id="general-saved-path"></span>
+                                    <span class="saved-path" id="general-saved-path">saved_global_vectorstore</span>
                                 </div>
-                            </div>
-
-                            <div class="document-list" id="general-documents">
-                                <!-- Documents will be populated here -->
                             </div>
                         </div>
                     </div>
@@ -153,28 +190,38 @@
                         <div class="card-header">
                             <div class="card-title-section">
                                 <h3 class="card-title">Company Documents</h3>
-                                <span class="document-count" id="company-count">0 documents</span>
+                                <div class="document-count" id="company-count">0 documents</div>
                             </div>
                             <div class="card-status" id="company-status">
-                                <span class="status status--info">Select model to enable building</span>
+                                <div class="status status--info">Select a model above to enable building</div>
                             </div>
                         </div>
                         
                         <div class="card-body">
-                            <p class="card-description">Upload company-specific documents for company knowledge base creation and storage</p>
-                            
+                            <p class="card-description">
+                                Upload company-specific documents for company knowledge base creation and storage
+                            </p>
+
+                            <!-- Upload Area -->
                             <div class="upload-area" id="company-upload-area">
-                                <input type="file" id="company-file-input" multiple accept=".pdf,.txt,.docx,.md,.xlsx" style="display: none;">
                                 <div class="upload-content">
-                                    <div class="upload-icon">📁</div>
+                                    <div class="upload-icon">🏢</div>
                                     <p class="upload-text">
                                         <strong>Drag and drop files here</strong><br>
-                                        or <button class="upload-link">browse files</button>
+                                        or <button type="button" class="upload-link">browse files</button>
                                     </p>
                                     <p class="upload-info">Supported formats: PDF, TXT, DOCX, MD, XLSX (Max 10MB each)</p>
                                 </div>
                             </div>
 
+                            <input type="file" id="company-file-input" multiple accept=".pdf,.txt,.docx,.md,.xlsx" style="display: none;">
+
+                            <!-- Document List -->
+                            <div class="document-list" id="company-documents">
+                                <p class="no-docs">No documents uploaded yet</p>
+                            </div>
+
+                            <!-- Build Section -->
                             <div class="build-section">
                                 <button class="btn btn--primary btn--full-width build-btn" id="company-build-btn" disabled>
                                     🏗️ Build & Save Knowledge Base
@@ -182,35 +229,198 @@
                                 <p class="build-hint" id="company-build-hint">Select a model above to enable building</p>
                             </div>
 
-                            <div class="status-display" id="company-status-display">
+                            <!-- Status Display -->
+                            <div class="status-display">
                                 <div class="status-item">
                                     <span class="status-label">Build Status:</span>
-                                    <span class="status-value" id="company-build-status">Select model to enable building</span>
+                                    <span class="status-value" id="company-build-status">No model selected</span>
                                 </div>
                                 <div class="status-item">
                                     <span class="status-label">Save Status:</span>
-                                    <span class="status-value" id="company-save-status">Not Saved</span>
+                                    <span class="status-value" id="company-save-status">Waiting...</span>
                                 </div>
                                 <div class="status-item saved-path-item" id="company-saved-path-item" style="display: none;">
                                     <span class="status-label">Saved Path:</span>
-                                    <span class="status-value saved-path" id="company-saved-path"></span>
+                                    <span class="saved-path" id="company-saved-path">saved_company_vectorstore</span>
                                 </div>
-                            </div>
-
-                            <div class="document-list" id="company-documents">
-                                <!-- Documents will be populated here -->
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- Chat Tab (Placeholder) -->
+            <!-- Assessment Tab -->
+            <div id="assessment" class="tab-content">
+                <div class="content-header">
+                    <h1>Document Assessment</h1>
+                    <p class="content-description">
+                        Upload a document to generate a comprehensive audit report
+                    </p>
+                </div>
+
+                <div class="assessment-container">
+                    <!-- Main Assessment Section -->
+                    <div class="assessment-main-section">
+                        <!-- Assessment Card -->
+                        <div class="document-card assessment-card">
+                            <div class="card-header">
+                                <div class="card-title-section">
+                                    <h3 class="card-title">Audit Assessment</h3>
+                                    <div class="assessment-status" id="assessment-file-status">No file uploaded</div>
+                                </div>
+                                <div class="card-status" id="assessment-status">
+                                    <div class="status status--info">Upload a document to begin</div>
+                                </div>
+                            </div>
+                            
+                            <div class="card-body">
+                                <p class="card-description">
+                                    Upload a document to perform a comprehensive assessment and generate a detailed audit report
+                                </p>
+
+                                <!-- Assessment Upload Area -->
+                                <div class="upload-area assessment-upload" id="assessment-upload-area">
+                                    <div class="upload-content">
+                                        <div class="upload-icon">📋</div>
+                                        <p class="upload-text">
+                                            <strong>Drag and drop a file here</strong><br>
+                                            or <button type="button" class="upload-link">browse file</button>
+                                        </p>
+                                        <p class="upload-info">Supported formats: PDF, TXT, DOCX, MD, XLSX (Max 25MB)</p>
+                                    </div>
+                                </div>
+
+                                <input type="file" id="assessment-file-input" accept=".pdf,.txt,.docx,.md,.xlsx" style="display: none;">
+
+                                <!-- Uploaded File Display -->
+                                <div class="assessment-file-display" id="assessment-file-display" style="display: none;">
+                                    <div class="document-item">
+                                        <div class="document-info">
+                                            <div class="document-icon" id="assessment-file-icon">📄</div>
+                                            <div class="document-details">
+                                                <h4 id="assessment-file-name">document.pdf</h4>
+                                                <p id="assessment-file-details">2.5 MB • Uploaded today</p>
+                                            </div>
+                                        </div>
+                                        <div class="document-actions">
+                                            <button class="delete-btn" id="assessment-remove-file" title="Remove file">
+                                                🗑️
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Assessment Action -->
+                                <div class="build-section">
+                                    <button class="btn btn--primary btn--full-width build-btn" id="run-assessment-btn" disabled>
+                                        📊 Run Assessment
+                                    </button>
+                                    <p class="build-hint" id="assessment-hint">Upload a file to enable assessment</p>
+                                </div>
+
+                                <!-- Assessment Status -->
+                                <div class="status-display">
+                                    <div class="status-item">
+                                        <span class="status-label">Assessment Status:</span>
+                                        <span class="status-value" id="assessment-progress-status">Ready</span>
+                                    </div>
+                                    <div class="status-item">
+                                        <span class="status-label">Report Status:</span>
+                                        <span class="status-value" id="report-status">Not generated</span>
+                                    </div>
+                                    <div class="status-item" id="report-download-item" style="display: none;">
+                                        <button class="btn btn--outline btn--sm" id="download-report-btn">
+                                            📥 Download Report
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Assessment Sidebar -->
+                    <div class="assessment-sidebar">
+                        <!-- Assessment Configuration -->
+                        <div class="assessment-config">
+                            <h4>Assessment Configuration</h4>
+                            
+                            <div class="assessment-config-form">
+                                <div class="form-group">
+                                    <label class="form-label" for="assessment-type">Assessment Type</label>
+                                    <select id="assessment-type" class="form-control">
+                                        <option value="comprehensive">Comprehensive Audit</option>
+                                        <option value="security">Security Assessment</option>
+                                        <option value="compliance">Compliance Review</option>
+                                        <option value="quality">Quality Analysis</option>
+                                        <option value="performance">Performance Evaluation</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group">
+                                    <label class="form-label" for="assessment-focus">Focus Areas</label>
+                                    <div class="checkbox-group">
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" value="structure" checked> Document Structure
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" value="content" checked> Content Quality
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" value="format" checked> Format Consistency
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" value="metadata"> Metadata Analysis
+                                        </label>
+                                        <label class="checkbox-item">
+                                            <input type="checkbox" value="accessibility"> Accessibility Check
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Assessment Progress Card -->
+                    <div class="document-card progress-card" id="assessment-progress-card" style="display: none;">
+                        <div class="card-header">
+                            <div class="card-title-section">
+                                <h3 class="card-title">Assessment Progress</h3>
+                            </div>
+                        </div>
+                        
+                        <div class="card-body">
+                            <div class="progress-info">
+                                <div class="progress-icon" id="assessment-progress-icon">🔍</div>
+                                <div class="progress-text">
+                                    <h4 id="assessment-progress-title">Analyzing Document...</h4>
+                                    <p id="assessment-progress-description">Processing document structure and content</p>
+                                </div>
+                            </div>
+                            
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="assessment-progress-fill"></div>
+                            </div>
+                            
+                            <div class="progress-steps" id="assessment-progress-steps">
+                                <div class="progress-step active">Document Upload</div>
+                                <div class="progress-step">Content Analysis</div>
+                                <div class="progress-step">Quality Assessment</div>
+                                <div class="progress-step">Report Generation</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Tab -->
             <div id="chat" class="tab-content">
-                <header class="content-header">
-                    <h1>Chat Interface</h1>
-                    <p class="content-description">Coming Soon - AI Chat interface with document knowledge retrieval</p>
-                </header>
+                <div class="content-header">
+                    <h1>Chat with Documents</h1>
+                    <p class="content-description">
+                        AI-powered document chat interface
+                    </p>
+                </div>
+
                 <div class="placeholder-content">
                     <div class="placeholder-icon">💬</div>
                     <h3>Chat Feature Under Development</h3>
@@ -218,12 +428,15 @@
                 </div>
             </div>
 
-            <!-- Settings Tab (Placeholder) -->
+            <!-- Settings Tab -->
             <div id="settings" class="tab-content">
-                <header class="content-header">
-                    <h1>Settings</h1>
-                    <p class="content-description">Configure your AI agent preferences and document processing settings</p>
-                </header>
+                <div class="content-header">
+                    <h1>Settings & Configuration</h1>
+                    <p class="content-description">
+                        Customize AI behavior and system preferences
+                    </p>
+                </div>
+
                 <div class="placeholder-content">
                     <div class="placeholder-icon">⚙️</div>
                     <h3>Settings Configuration</h3>
@@ -233,24 +446,23 @@
         </main>
     </div>
 
-    <!-- Processing Status Modal -->
+    <!-- Processing Modal -->
     <div class="modal hidden" id="processing-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Building & Saving Knowledge Base</h3>
+                <h3 id="processing-title">Processing Documents</h3>
             </div>
             <div class="modal-body">
                 <div class="processing-info">
                     <div class="processing-icon" id="processing-icon">🏗️</div>
                     <div class="processing-text">
-                        <h4 id="processing-title">Processing Documents</h4>
-                        <p id="processing-status">Building knowledge base...</p>
+                        <h4 id="processing-status">Preparing to build knowledge base...</h4>
+                        <p id="processing-details">Model: llama2 | Documents: 0</p>
                     </div>
                 </div>
                 <div class="progress-bar">
                     <div class="progress-fill" id="progress-fill"></div>
                 </div>
-                <div class="processing-details" id="processing-details"></div>
             </div>
         </div>
     </div>
@@ -259,21 +471,19 @@
     <div class="modal hidden" id="delete-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>Delete Document</h3>
+                <h3>Confirm Deletion</h3>
             </div>
             <div class="modal-body">
                 <p>Are you sure you want to delete this document? This action cannot be undone.</p>
                 <div class="modal-actions">
                     <button class="btn btn--outline" id="cancel-delete">Cancel</button>
-                    <button class="btn btn--primary" id="confirm-delete">Delete Document</button>
+                    <button class="btn btn--primary" id="confirm-delete" style="background-color: var(--color-error);">Delete</button>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Toast Container -->
-    <div class="toast-container" id="toast-container"></div>
-
+    <!-- JavaScript -->
     <script src="app.js"></script>
 </body>
 </html>
