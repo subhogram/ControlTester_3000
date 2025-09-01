@@ -235,21 +235,21 @@
                 </div>
             </div>
 
-            <!-- Document Assessment Tab -->
+            <!-- Evidence Assessment Tab -->
             <div id="document-assessment" class="tab-content">
                 <div class="content-header">
-                    <h1>Document Assessment</h1>
+                    <h1>Evidence Assessment</h1>
                     <p class="content-description">Upload documents to generate comprehensive audit reports</p>
                 </div>
 
                 <div class="assessment-container">
                     <!-- Assessment Main Section -->
                     <div class="assessment-main-section">
-                        <!-- Document Assessment Card -->
+                        <!-- Evidence Assessment Card -->
                         <div class="assessment-card">
                             <div class="card-header">
                                 <div class="card-title-section">
-                                    <h3 class="card-title">Document Assessment</h3>
+                                    <h3 class="card-title">Evidence Assessment</h3>
                                     <p class="assessment-status" id="assessment-count">No documents selected</p>
                                 </div>
                                 <div class="card-status">
@@ -379,7 +379,11 @@
                     </div>
 
                     <form id="chat-form" class="chat-input-row" autocomplete="off">
-                        <button type="button" class="chat-action chat-attach" title="Attach">📎</button>
+                        <div class="chat-attach-group">
+                            <button type="button" class="chat-action chat-attach" id="chat-attach-btn" title="Attach">📎</button>
+                            <span id="chat-attach-badge" class="chat-attach-badge" aria-live="polite" style="display:none;"></span>
+                            <button type="button" class="chat-action chat-attach-clear" id="chat-clear-attachments" title="Clear attachments">✖</button>
+                        </div>
                         <textarea id="chat-input" class="chat-input"
                             placeholder="Write a message… (Shift+Enter for new line)"></textarea>
                         <div class="chat-send-group">
@@ -402,6 +406,7 @@
     <input type="file" id="general-file-input" accept=".pdf,.txt,.docx,.md" multiple style="display: none;">
     <input type="file" id="company-file-input" accept=".pdf,.txt,.docx,.md,.xlsx" multiple style="display: none;">
     <input type="file" id="assessment-file-input" accept=".pdf,.txt,.docx,.md,.xlsx" multiple style="display: none;">
+    <input type="file" id="chat-attach-input" accept=".pdf,.txt,.doc,.docx,.md,.csv,.xlsx,.jpeg,.jpg" multiple style="display: none;">
 
     <!-- Delete Confirmation Modal -->
     <div id="delete-modal" class="modal hidden">

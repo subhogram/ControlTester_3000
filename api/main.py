@@ -95,7 +95,7 @@ def _req_id() -> str:
 # ----------------------------------------------------------------------------
 # In-memory Vectorstore Cache
 # ----------------------------------------------------------------------------
-VECTORSTORE_CACHE: Dict[str, Any] = {"global": None, "company": None, "evidence": None}
+VECTORSTORE_CACHE: Dict[str, Any] = {"global": None, "company": None, "evidence": None, "chat": None}
 
 # ----------------------------------------------------------------------------
 # Pydantic models
@@ -142,6 +142,7 @@ class ChatRequest(BaseModel):
     user_input: str = Field(..., description="User question or prompt")
     global_kb_path: Optional[str] = Field(None, description="Path to saved global FAISS KB")
     company_kb_path: Optional[str] = Field(None, description="Path to saved company FAISS KB")
+    chat_kb_path: Optional[str] = Field(None, description="Path to saved chat attachments FAISS KB")
     evid_kb_path: Optional[str] = Field(None, description="Path to saved evidence FAISS KB")
     embedding_model: Optional[str] = Field(None, description="Optional embedding model name to use for similarity checks")
 
@@ -214,8 +215,10 @@ async def chat(request: ChatRequest):
     try:
         request.selected_model = request.selected_model.strip()
         request.user_input = request.user_input.strip()
-        request.global_kb_path = "saved_global_vectorstore"
-        request.company_kb_path = "saved_company_vectorstore"
+        # Default paths if not provided by client
+        request.global_kb_path = request.global_kb_path or "saved_global_vectorstore"
+        request.company_kb_path = request.company_kb_path or "saved_company_vectorstore"
+        request.chat_kb_path = request.chat_kb_path or "chat_attachment_vectorstore"
         if not request.selected_model or not request.user_input:
             raise ValueError("selected_model and user_input are required")
     except Exception as e:
@@ -224,8 +227,8 @@ async def chat(request: ChatRequest):
     base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
     embeddings_for_load = OllamaEmbeddings(model=request.selected_model, base_url=base_url)
 
-    loaded_stores: Dict[str, Any] = {"global": None, "company": None, "evidence": None}
-    loaded_paths: Dict[str, Optional[str]] = {"global": None, "company": None, "evidence": None}
+    loaded_stores: Dict[str, Any] = {"global": None, "company": None, "evidence": None, "chat": None}
+    loaded_paths: Dict[str, Optional[str]] = {"global": None, "company": None, "evidence": None, "chat": None}
     try:
         if request.global_kb_path and Path(request.global_kb_path).exists():
             loaded_stores['global'] = load_faiss_vectorstore(request.global_kb_path, embeddings_for_load)
@@ -236,6 +239,9 @@ async def chat(request: ChatRequest):
         if request.evid_kb_path and Path(request.evid_kb_path).exists():
             loaded_stores['evidence'] = load_faiss_vectorstore(request.evid_kb_path, embeddings_for_load)
             loaded_paths['evidence'] = request.evid_kb_path
+        if request.chat_kb_path and Path(request.chat_kb_path).exists():
+            loaded_stores['chat'] = load_faiss_vectorstore(request.chat_kb_path, embeddings_for_load)
+            loaded_paths['chat'] = request.chat_kb_path
     except FileNotFoundError as fe:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(fe))
     except Exception as e:
@@ -250,6 +256,7 @@ async def chat(request: ChatRequest):
             kb_vectorstore=loaded_stores['global'],
             company_kb_vectorstore=loaded_stores['company'],
             evid_vectorstore=loaded_stores['evidence'],
+            chat_attachment_vectorstore=loaded_stores['chat'],
             selected_model=request.selected_model,
             user_input=request.user_input,
             embedding_model=embedding_instance

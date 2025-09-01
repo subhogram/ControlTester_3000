@@ -67,12 +67,14 @@
     setSending(true);
 
     try {
+      const chatPath = sessionStorage.getItem("chatAttachmentPath");
       const res = await fetch("http://localhost:8000/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           selected_model: model,
-          user_input: text
+          user_input: text,
+          ...(chatPath ? { chat_kb_path: chatPath } : {})
           // server automatically loads saved vectorstores if present
         })
       });
@@ -126,6 +128,10 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     setModelPill();
+    // If the unified UI manager is present, avoid wiring duplicate handlers
+    if (window.uiManager && typeof window.uiManager.sendChatMessage === 'function') {
+      return; // app.js handles chat events
+    }
     wireEvents();
   });
 })();

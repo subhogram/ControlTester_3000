@@ -58,7 +58,7 @@ def bot_chat_box(message):
         unsafe_allow_html=True,
     )
 
-def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vectorstore, selected_model):    
+def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vectorstore, chat_attachment_vectorstore, selected_model):    
     st.markdown(
         f"""
         <style>
@@ -100,7 +100,8 @@ def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vecto
             st.experimental_rerun()
 
     if send_clicked and user_input.strip() != "":
-        cybersecurity_bot_prompt, response = chat_with_ai(kb_vectorstore, company_kb_vectorstore, evid_vectorstore, selected_model, user_input)
+        embedding_model = OllamaEmbeddings(model="llama3:latest", base_url=os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434'))
+        cybersecurity_bot_prompt, response = chat_with_ai(kb_vectorstore, company_kb_vectorstore, evid_vectorstore, chat_attachment_vectorstore, selected_model, user_input,embedding_model)
         logger.info(f"Generated Prompt: {cybersecurity_bot_prompt}")
         logger.info(f"User input: {user_input}")
         st.session_state["chat_history"].append({"user": user_input, "bot": response})
@@ -114,13 +115,13 @@ def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vecto
         user_chat_box(chat["user"])
         bot_chat_box(chat["bot"])
 
-def chat_with_ai(kb_vectorstore, company_kb_vectorstore, evid_vectorstore, selected_model, user_input,embedding_model = None):
+def chat_with_ai(kb_vectorstore, company_kb_vectorstore, evid_vectorstore, chat_attachment_vectorstore, selected_model, user_input,embedding_model = None):
     ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
     llm = OllamaLLM(model=selected_model, base_url=ollama_base_url)
 
     # Default embedding model (must be SAME one used when building vectorstores!)
     if embedding_model is None:
-        embedding_model = OllamaEmbeddings(model="gemma3:latest", base_url=ollama_base_url)
+        embedding_model = OllamaEmbeddings(model="llama3:latest", base_url=ollama_base_url)
 
     # Debug: check FAISS dimension consistency
     def safe_similarity_search(store, query):
@@ -141,6 +142,7 @@ def chat_with_ai(kb_vectorstore, company_kb_vectorstore, evid_vectorstore, selec
     kb_contexts = safe_similarity_search(kb_vectorstore, user_input)
     company_contexts = safe_similarity_search(company_kb_vectorstore, user_input)
     evid_contexts = safe_similarity_search(evid_vectorstore, user_input)
+    chat_file_contexts = safe_similarity_search(chat_attachment_vectorstore, user_input) if chat_attachment_vectorstore else []
 
     kb_context = "\n\n".join([c.page_content for c in kb_contexts]) if kb_contexts else None
     company_kb_context = "\n\n".join([c.page_content for c in company_contexts]) if company_contexts else None
@@ -153,13 +155,15 @@ def chat_with_ai(kb_vectorstore, company_kb_vectorstore, evid_vectorstore, selec
                 "user_input",
                 "kb_context",
                 "company_kb_context",
-                "evid_context"
+                "evid_context",
+                "chat_file_contexts"
             ],
             template="""
                     You are a highly capable cybersecurity assistant. You have access to the following contextual sources:
                     You have a base level understanding of cybersecurity risk and control policies from : {kb_context}
                     You have an understanding of company-specific policies, procedures, and guidelines from : {company_kb_context}
-                    User may upload some files and you have access to the following evidence or uploaded files context : {evid_context}                   
+                    You have access to the following uploaded files context : {chat_file_contexts}
+                    You have access to the following log evidences : {evid_context}                   
                     --- USER QUESTION OR TASK ---
                     {user_input}
                     Instructions:
@@ -181,7 +185,8 @@ def chat_with_ai(kb_vectorstore, company_kb_vectorstore, evid_vectorstore, selec
                 "user_input": user_input,
                 "kb_context": kb_context,
                 "company_kb_context": company_kb_context,
-                "evid_context": evid_context
+                "evid_context": evid_context,
+                "chat_file_contexts": chat_file_contexts
             })
         
     return cybersecurity_bot_prompt,response

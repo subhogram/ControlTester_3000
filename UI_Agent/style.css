@@ -3544,7 +3544,27 @@ select.form-control {
 /* Mobile tweaks */
 @media (max-width: 640px) {
   #document-chat .chat-messages { height: 55vh; padding-bottom: var(--space-20); margin-bottom: var(--space-12); }
-  #document-chat .chat-input-row { grid-template-columns: 1fr auto; gap: var(--space-8); }
-  #document-chat .chat-attach { display: none; }
+  #document-chat .chat-input-row { grid-template-columns: auto 1fr auto; gap: var(--space-8); }
+  /* Ensure attach button stays visible on mobile */
+  #document-chat .chat-attach { display: inline-flex; }
   #document-chat .chat-bubble { padding: var(--space-10) var(--space-12); }
+}
+
+/* Chat attachment badge */
+#document-chat .chat-attach-badge {
+  margin-left: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: var(--radius-full);
+  background: var(--color-secondary);
+  color: var(--color-text);
+  border: 1px solid var(--color-card-border-inner);
+}
+
+/* Chat attachment control group */
+#document-chat .chat-attach-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
 }

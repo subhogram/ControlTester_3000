@@ -407,7 +407,7 @@ with st.expander("4️⃣ Chat with the agent", expanded=True):
         st.toast(f"Currently selected model: **{selected_model}**") 
 
     st.subheader("Chat with the Audit Bot")
-    chat_with_bot(st.session_state['kb_vectorstore'], st.session_state['company_kb_vectorstore'], st.session_state['assessment'], st.session_state['evid_vectorstore'], st.session_state['selected_model'])
+    chat_with_bot(st.session_state['kb_vectorstore'], st.session_state['company_kb_vectorstore'], st.session_state['assessment'], st.session_state['evid_vectorstore'], None, st.session_state['selected_model'])
     if st.session_state.get('assessment_done') or st.session_state.get('kb_ready') or st.session_state.get('company_files_ready'):
         st.info("You can now ask questions about your audit and files. The bot will assist you based on the knowledge base and processed files.")
     else:

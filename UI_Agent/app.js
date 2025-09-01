@@ -157,7 +157,7 @@ class DocumentAPI {
         setTimeout(() => URL.revokeObjectURL(a.href), 0);
     }
 
-    static async chat(userInput) {
+    static async chat(userInput, opts = {}) {
         const selectedModel = sessionStorage.getItem("selectedModel");
         if (!selectedModel) throw new Error("Please select a model before chatting.");
 
@@ -165,6 +165,10 @@ class DocumentAPI {
             selected_model: selectedModel,
             user_input: userInput, // server auto-loads saved vectorstores if present
         };
+
+        // If a chat attachment vectorstore is present, include it as chat KB
+        const chatPath = opts.chat_path ?? sessionStorage.getItem("chatAttachmentPath");
+        if (chatPath) payload.chat_kb_path = chatPath;
 
         const r = await fetch(`${this.baseUrl}/chat`, {
             method: "POST",
@@ -191,6 +195,11 @@ class UIManager {
         // Files
         this.files = { general: [], company: [] };
         this.assessmentFiles = [];
+
+        // Chat attachments
+        this.chatAttachments = [];
+        this.chatAttachmentVectors = 0;
+        this.chatAttachmentsDirty = false;
 
         // Chat
         this.chatHistory = []; // store objects {role:'user'|'assistant', text:'...'}
@@ -804,6 +813,11 @@ class UIManager {
         const form = this.$("chat-form");
         const input = this.$("chat-input");
         const clear = this.$("chat-clear");
+        const sendBtn = this.$("chat-send");
+        const attachBtn = document.querySelector("#chat-attach-btn, .chat-attach");
+        const attachInput = this.$("chat-attach-input");
+        const attachBadge = this.$("chat-attach-badge");
+        const clearAttachBtn = this.$("chat-clear-attachments");
 
         if (form) form.addEventListener("submit", (e) => {
             e.preventDefault();
@@ -816,6 +830,10 @@ class UIManager {
                     this.sendChatMessage();
                 }
             });
+            // Disable send when there's no text
+            const updateSend = () => { if (sendBtn) sendBtn.disabled = !(input.value.trim().length > 0); };
+            input.addEventListener("input", updateSend);
+            updateSend();
         }
         if (clear) {
             clear.addEventListener("click", () => {
@@ -830,6 +848,22 @@ class UIManager {
             </div>`;
                 }
             });
+        }
+
+        // Attach button wiring
+        if (attachBtn && attachInput) {
+            attachBtn.addEventListener("click", () => attachInput.click());
+            attachInput.addEventListener("change", async (e) => {
+                const files = Array.from(e.target.files || []);
+                if (!files.length) return;
+                await this.handleChatAttachments(files, attachBtn, attachBadge);
+                attachInput.value = ""; // reset for next selection
+            });
+        }
+
+        // Clear attachments wiring
+        if (clearAttachBtn) {
+            clearAttachBtn.addEventListener("click", () => this.clearChatAttachments(attachBadge));
         }
     }
 
@@ -869,7 +903,22 @@ class UIManager {
         input.disabled = true;
         if (btn) { btn.disabled = true; this._toggleSendSpinner(true); }
 
-        // Show user's message
+        // Build & save queued attachments only when sending
+        try {
+            const attachInfo = await this._prepareChatAttachmentsIfNeeded();
+            if (attachInfo && attachInfo.count) {
+                const names = this.chatAttachments.map(f => this._escape(f.name)).join(", ");
+                const infoMsg = `📎 Uploaded ${attachInfo.count} file(s)` + (attachInfo.vectors ? ` · ${attachInfo.vectors} vectors` : "") + `: ${names}`;
+                this.addChatMessage("user", infoMsg);
+            }
+        } catch (err) {
+            if (btn) { btn.disabled = false; this._toggleSendSpinner(false); }
+            input.disabled = false;
+            this.addChatMessage("assistant", `⚠️ Attachment upload failed: ${err.message || String(err)}`);
+            return;
+        }
+
+        // Show user's actual message
         this.addChatMessage("user", text);
         input.value = "";
 
@@ -880,9 +929,14 @@ class UIManager {
             const context = recent.map(m => (m.role === "user" ? `User: ${m.text}` : `Assistant: ${m.text}`)).join("\n");
             const composed = context ? `${context}\nUser: ${text}` : text;
 
+            // Include evidence path if chat attachments were prepared (set in sessionStorage)
             const res = await DocumentAPI.chat(composed);
             const reply = res.response || "No response.";
             this.addChatMessage("assistant", reply);
+
+            // Clear attachments from chat UI/state after successful send
+            const attachBadge = this.$("chat-attach-badge");
+            this.clearChatAttachments(attachBadge, { silent: true });
 
             // Persist local chat memory
             this.chatHistory.push({ role: "user", text });
@@ -894,7 +948,76 @@ class UIManager {
             if (btn) { btn.disabled = false; this._toggleSendSpinner(false); }
             input.disabled = false;
             input.focus();
+            // Keep send disabled if input is empty after send
+            if (btn) btn.disabled = !(input.value.trim().length > 0);
             this.syncChatModelChip(); // keep pill accurate
+        }
+    }
+
+    async handleChatAttachments(files, attachBtnEl, attachBadgeEl) {
+        try {
+            if (!this.validateSessionModel()) {
+                this.showToast("Select a model before attaching files.", "warning");
+                return;
+            }
+            if (!files?.length) return;
+            // Queue files; actual upload/vectorization happens on send
+            this.chatAttachments.push(...files);
+            this.chatAttachmentsDirty = true;
+            this.showToast(`Queued ${files.length} file(s) for upload on send.`, "success");
+
+            // Update badge UI with total queued files
+            if (attachBadgeEl) {
+                attachBadgeEl.style.display = "inline-block";
+                attachBadgeEl.textContent = `${this.chatAttachments.length}`;
+                attachBadgeEl.title = `${this.chatAttachments.length} file(s) queued`;
+            }
+        } catch (e) {
+            this.showToast(e.message || String(e), "error");
+            console.error("Chat attachment error", e);
+        } finally {
+            // no-op
+        }
+    }
+
+    async _prepareChatAttachmentsIfNeeded() {
+        if (!this.chatAttachmentsDirty || !this.chatAttachments?.length) return null;
+        const selectedModel = sessionStorage.getItem("selectedModel");
+        const kbType = "chat_attachment";
+        const saveDir = "chat_attachment_vectorstore";
+
+        const build = await DocumentAPI.buildKnowledgeBase(this.chatAttachments, kbType, selectedModel);
+        this.chatAttachmentVectors = build.vector_count ?? 0;
+        await DocumentAPI.saveVectorstore(kbType, saveDir);
+        sessionStorage.setItem("chatAttachmentPath", saveDir);
+        this.chatAttachmentsDirty = false;
+        return { count: this.chatAttachments.length, vectors: this.chatAttachmentVectors, path: saveDir };
+    }
+
+    clearChatAttachments(attachBadgeEl, opts = {}) {
+        const silent = opts.silent === true;
+        const hadAny = (this.chatAttachments && this.chatAttachments.length) || sessionStorage.getItem("chatAttachmentPath");
+        // Clear state and session
+        this.chatAttachments = [];
+        this.chatAttachmentVectors = 0;
+        this.chatAttachmentsDirty = false;
+        sessionStorage.removeItem("chatAttachmentPath");
+
+        // Update badge UI
+        if (attachBadgeEl) {
+            attachBadgeEl.style.display = "none";
+            attachBadgeEl.textContent = "";
+            attachBadgeEl.title = "";
+        }
+
+        // Feedback
+        if (!silent) {
+            if (hadAny) {
+                this.addChatMessage("user", "🧹 Cleared chat attachments.");
+                this.showToast("Chat attachments cleared.", "info");
+            } else {
+                this.showToast("No attachments to clear.", "info");
+            }
         }
     }
 
