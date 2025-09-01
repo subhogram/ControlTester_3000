@@ -2891,3 +2891,196 @@ select.form-control {
     font-size: var(--font-size-xs);
   }
 }
+
+/* === Chat UI (non-invasive; keeps existing design language) === */
+.chat-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+
+.chat-model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-6) var(--space-10);
+  border: 1px solid var(--color-card-border-inner);
+  border-radius: var(--radius-base);
+  background: var(--color-bg-2);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.chat-messages {
+  border: 1px solid var(--color-card-border-inner);
+  border-radius: var(--radius-lg);
+  background: var(--color-background);
+  padding: var(--space-16);
+  height: 440px;
+  overflow-y: auto;
+}
+
+.chat-empty {
+  text-align: center;
+  color: var(--color-text-secondary);
+  padding: var(--space-24) 0;
+}
+
+.chat-msg {
+  display: grid;
+  grid-template-columns: 32px 1fr;
+  gap: var(--space-12);
+  margin-bottom: var(--space-12);
+  align-items: start;
+}
+
+.chat-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-3);
+  border: 1px solid var(--color-card-border-inner);
+  font-size: 16px;
+}
+
+.chat-bubble {
+  border: 1px solid var(--color-card-border-inner);
+  border-radius: var(--radius-lg);
+  padding: var(--space-12) var(--space-14);
+  background: var(--color-bg-2);
+  white-space: pre-wrap;
+  line-height: var(--line-height-relaxed);
+}
+
+.chat-msg.user .chat-bubble {
+  background: var(--color-primary-tint);
+  border-color: var(--color-primary);
+}
+
+.chat-msg.assistant .chat-bubble {
+  background: var(--color-bg-2);
+}
+
+.chat-input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: var(--space-12);
+  align-items: end;
+}
+
+.chat-input {
+  border: 1px solid var(--color-card-border-inner);
+  border-radius: var(--radius-lg);
+  background: var(--color-background);
+  min-height: 52px;
+  max-height: 180px;
+  padding: var(--space-12) var(--space-14);
+  resize: vertical;
+  font: inherit;
+  color: var(--color-text);
+}
+
+.chat-send {
+  min-width: 110px;
+}
+
+.send-spinner {
+  font-style: italic;
+}
+
+.chat-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: var(--space-8);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+/* === Clean document list styling (consistent across cards) === */
+.document-list {
+  border: 1px solid var(--color-card-border-inner);
+  background: var(--color-background);
+  border-radius: var(--radius-lg);
+  padding: var(--space-12);
+  max-height: 260px;              /* keeps card compact */
+  overflow: auto;                 /* scroll when long */
+}
+
+.document-list .no-docs {
+  margin: 0;
+  padding: var(--space-16);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+.doc-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+  padding: var(--space-10) var(--space-12);
+  border: 1px solid var(--color-card-border-inner);
+  background: var(--color-surface);
+  border-radius: var(--radius-md);
+}
+
+.doc-item + .doc-item {
+  margin-top: var(--space-8);
+}
+
+.doc-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  min-width: 0; /* enable truncation */
+}
+
+.doc-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-md);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--color-card-border-inner);
+  background: rgba(var(--color-success-rgb), 0.06);
+  font-size: 16px;
+}
+
+.doc-meta {
+  min-width: 0; /* enable truncation */
+}
+
+.doc-name {
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 520px;               /* keeps long names tidy */
+}
+
+.doc-sub {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.doc-right {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+/* Clear-all button row for document lists */
+.doc-list-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-8);
+}

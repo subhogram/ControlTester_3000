@@ -1,1967 +1,912 @@
-// Complete AI Document Management & Assessment System
-// Enhanced with vectorstore detection, assessment functionality, and PDF generation
+// Complete AI Document Management & Assessment System (with Chat + Auto Vectorstore Load)
+// - Preserves existing UI design and behaviors
+// - On init: checks & loads saved vectorstores (global/company) and updates UI
+// - Multi-file uploads for KB and Assessment
+// - Uses selected model from Model Configuration (sessionStorage.selectedModel)
+// - Robust null-safe DOM access to avoid "Cannot set properties of null"
+
+// ============ Debug Console ============
 
 class DebugConsole {
     static instance = null;
-    
     static getInstance() {
-        if (!DebugConsole.instance) {
-            DebugConsole.instance = new DebugConsole();
-        }
+        if (!DebugConsole.instance) DebugConsole.instance = new DebugConsole();
         return DebugConsole.instance;
     }
-    
     constructor() {
         this.logs = [];
         this.maxLogs = 100;
     }
-    
     log(message, data = null) {
         const timestamp = new Date().toLocaleTimeString();
-        const logEntry = { timestamp, message, data, type: 'log' };
-        
-        console.log(`[${timestamp}] ${message}`, data || '');
-        this.addToPanel(logEntry);
-        this.logs.push(logEntry);
-        
-        if (this.logs.length > this.maxLogs) {
-            this.logs.shift();
-        }
+        const entry = { timestamp, message, data, type: "log" };
+        console.log(`[${timestamp}] ${message}`, data ?? "");
+        this._append(entry);
     }
-    
     error(message, error) {
         const timestamp = new Date().toLocaleTimeString();
-        const logEntry = { 
-            timestamp, 
-            message, 
-            data: error?.stack || error?.message || error, 
-            type: 'error' 
-        };
-        
+        const entry = { timestamp, message, data: error?.stack || error?.message || error, type: "error" };
         console.error(`[${timestamp}] ERROR: ${message}`, error);
-        this.addToPanel(logEntry);
-        this.logs.push(logEntry);
-        
-        if (this.logs.length > this.maxLogs) {
-            this.logs.shift();
-        }
+        this._append(entry);
     }
-    
-    addToPanel(logEntry) {
-        const debugPanel = document.getElementById('debug-output');
-        if (!debugPanel) return;
-        
-        const entry = document.createElement('div');
-        entry.className = `debug-entry ${logEntry.type}`;
-        entry.innerHTML = `
-            <span class="debug-time">${logEntry.timestamp}</span>
-            <span class="debug-message">${logEntry.message}</span>
-            ${logEntry.data ? `<pre class="debug-data">${typeof logEntry.data === 'object' ? JSON.stringify(logEntry.data, null, 2) : logEntry.data}</pre>` : ''}
-        `;
-        
-        debugPanel.appendChild(entry);
-        debugPanel.scrollTop = debugPanel.scrollHeight;
-        
-        // Keep only last 50 entries in DOM for performance
-        const entries = debugPanel.querySelectorAll('.debug-entry');
-        if (entries.length > 50) {
-            entries[0].remove();
+    _append(entry) {
+        const panel = document.getElementById("debug-output");
+        if (panel) {
+            const div = document.createElement("div");
+            div.className = `debug-entry ${entry.type}`;
+            div.innerHTML = `
+        <span class="debug-time">${entry.timestamp}</span>
+        <span class="debug-message">${entry.message}</span>
+        ${entry.data ? `<div class="debug-data">${typeof entry.data === "object" ? JSON.stringify(entry.data, null, 2) : String(entry.data)}</div>` : ""}
+      `;
+            panel.appendChild(div);
+            panel.scrollTop = panel.scrollHeight;
+            const keep = panel.querySelectorAll(".debug-entry");
+            if (keep.length > 50) keep[0].remove();
         }
+        this.logs.push(entry);
+        if (this.logs.length > this.maxLogs) this.logs.shift();
     }
-    
     clear() {
-        const debugPanel = document.getElementById('debug-output');
-        if (debugPanel) {
-            debugPanel.innerHTML = '';
-        }
+        const panel = document.getElementById("debug-output");
+        if (panel) panel.innerHTML = "";
         this.logs = [];
     }
-    
     downloadLogs() {
-        const logData = this.logs.map(log => 
-            `[${log.timestamp}] ${log.type.toUpperCase()}: ${log.message}${log.data ? '\n' + (typeof log.data === 'object' ? JSON.stringify(log.data, null, 2) : log.data) : ''}`
-        ).join('\n\n');
-        
-        const blob = new Blob([logData], { type: 'text/plain' });
+        const txt = this.logs.map(l => `[${l.timestamp}] ${l.type.toUpperCase()}: ${l.message}${l.data ? `\n${typeof l.data === "object" ? JSON.stringify(l.data, null, 2) : l.data}` : ""}`).join("\n\n");
+        const blob = new Blob([txt], { type: "text/plain" });
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `debug-log-${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.txt`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        const a = Object.assign(document.createElement("a"), { href: url, download: `debug-log-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.txt` });
+        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
 }
 
+// ============ API Layer ============
+
 class DocumentAPI {
-    static baseUrl = 'http://localhost:8000';
-    
-    static async getModels() {
+    static baseUrl = "http://localhost:8000";
+
+    static async checkHealth() {
         const debug = DebugConsole.getInstance();
-        debug.log('API: Fetching available models...');
-        
         try {
-            const response = await fetch(`${this.baseUrl}/models`);
-            debug.log(`API: Models request response status: ${response.status}`);
-            
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-            
-            const data = await response.json();
-            debug.log('API: Models response received', data);
-            
-            let models = [];
-            if (Array.isArray(data)) {
-                models = data;
-            } else if (data.models && Array.isArray(data.models)) {
-                models = data.models;
-            } else if (data.data && Array.isArray(data.data)) {
-                models = data.data;
-            }
-            
-            debug.log(`API: Processed models list (${models.length} models)`, models);
-            return models;
-            
-        } catch (error) {
-            debug.error('API: Failed to fetch models', error);
-            console.warn('API not available, using mock models:', error.message);
-            
-            // Return mock models for testing
-            const mockModels = ['llama2', 'codellama', 'mistral', 'phi', 'qwen2'];
-            debug.log('API: Using mock models for testing', mockModels);
-            return mockModels;
+            const r = await fetch(`${this.baseUrl}/health`);
+            debug.log(`API: /health -> ${r.status}`);
+            return r.ok;
+        } catch (e) {
+            debug.error("API: health failed", e);
+            return false;
         }
     }
-    
-    // Vectorstore Detection Method
-    static async checkExistingVectorstores() {
+
+    static async getModels() {
         const debug = DebugConsole.getInstance();
-        debug.log('API: Checking for existing vectorstores...');
-        
+        debug.log("API: fetching models…");
+        try {
+            const r = await fetch(`${this.baseUrl}/models`);
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const data = await r.json();
+            const models = Array.isArray(data) ? data : (data.models || data.data || []);
+            debug.log("API: models", models);
+            return models;
+        } catch (e) {
+            debug.error("API: getModels failed, using mock", e);
+            return ["llama2", "mistral", "qwen2", "phi", "codellama"];
+        }
+    }
+
+    // NEW: check & load saved vectorstores (global/company) into server cache.
+    static async checkExistingVectorstores(preferredModel = null) {
+        const debug = DebugConsole.getInstance();
+        debug.log("API: Checking for existing vectorstores…");
+
         const result = {
             general: { exists: false, path: null, vector_count: 0, last_modified: null },
             company: { exists: false, path: null, vector_count: 0, last_modified: null }
         };
-        
+
         try {
-            // Get available models for testing vectorstore loading
-            const models = await this.getModels();
-            const testModel = models.length > 0 ? models[0] : 'llama2';
-            
-            // Check both vectorstore paths
+            let modelName = preferredModel;
+            if (!modelName) {
+                const models = await this.getModels();
+                modelName = models?.[0] || "llama2";
+            }
+
             const checks = [
-                { type: 'general', path: 'saved_global_vectorstore', kb_type: 'global' },
-                { type: 'company', path: 'saved_company_vectorstore', kb_type: 'company' }
+                { type: "general", path: "saved_global_vectorstore", kb_type: "global" },
+                { type: "company", path: "saved_company_vectorstore", kb_type: "company" }
             ];
-            
+
             for (const check of checks) {
                 try {
-                    debug.log(`API: Checking ${check.type} vectorstore at ${check.path}`);
-                    
-                    const formData = new FormData();
-                    formData.append('dir_path', check.path);
-                    formData.append('kb_type', check.kb_type);
-                    formData.append('model_name', testModel);
-                    
-                    const response = await fetch(`${this.baseUrl}/load-vectorstore`, {
-                        method: 'POST',
-                        body: formData
-                    });
-                    
-                    if (response.ok) {
-                        const data = await response.json();
-                        if (data.success) {
+                    const form = new FormData();
+                    form.append("dir_path", check.path);
+                    form.append("kb_type", check.kb_type);
+                    form.append("model_name", modelName);
+
+                    const resp = await fetch(`${this.baseUrl}/load-vectorstore`, { method: "POST", body: form });
+                    debug.log(`API: /load-vectorstore (${check.kb_type}) -> ${resp.status}`);
+
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data?.success) {
                             result[check.type] = {
                                 exists: true,
                                 path: check.path,
-                                vector_count: data.ntotal || 0,
+                                vector_count: data.ntotal ?? data.vector_count ?? 0,
                                 last_modified: new Date().toISOString()
                             };
-                            debug.log(`API: Found ${check.type} vectorstore with ${data.ntotal || 0} vectors`);
+                            debug.log(`API: Loaded ${check.kb_type} KB with ${result[check.type].vector_count} vectors.`);
+                        } else {
+                            debug.log(`API: ${check.kb_type} KB not loaded:`, data);
                         }
                     } else {
-                        debug.log(`API: No ${check.type} vectorstore found (${response.status})`);
+                        const err = await resp.text();
+                        debug.log(`API: ${check.kb_type} KB load not OK: ${resp.status} ${err}`);
                     }
-                } catch (error) {
-                    debug.log(`API: Error checking ${check.type} vectorstore:`, error.message);
+                } catch (e) {
+                    debug.log(`API: Error checking ${check.kb_type} KB`, e?.message || e);
                 }
             }
-            
-            debug.log('API: Vectorstore check completed', result);
+
             return result;
-            
-        } catch (error) {
-            debug.error('API: Failed to check vectorstores', error);
-            
-            // Return mock data for demo when API is unavailable
-            debug.log('API: Using mock vectorstore data for demo');
-            return {
-                general: {
-                    exists: Math.random() > 0.5,
-                    path: 'saved_global_vectorstore',
-                    vector_count: Math.floor(Math.random() * 300) + 50,
-                    last_modified: new Date(Date.now() - Math.random() * 86400000 * 7).toISOString()
-                },
-                company: {
-                    exists: Math.random() > 0.3,
-                    path: 'saved_company_vectorstore',
-                    vector_count: Math.floor(Math.random() * 500) + 100,
-                    last_modified: new Date(Date.now() - Math.random() * 86400000 * 3).toISOString()
-                }
-            };
+        } catch (e) {
+            debug.error("API: vectorstore check failed", e);
+            // Return a conservative default (no mocks) to avoid confusing UI
+            return result;
         }
     }
-    
-    // Assessment API
-    static async runAssessment(files) {
+
+    static async buildKnowledgeBase(files, kbType, selectedModel, opts = {}) {
         const debug = DebugConsole.getInstance();
-        debug.log(`API: Running assessment`);
-        const sessionModel = sessionStorage.getItem('selectedModel');
-        try {
-            //API call for assessment
-            const formData = new FormData();
-            formData.append('selected_model', sessionModel);
-            formData.append('max_workers', '4');
+        if (!selectedModel) throw new Error("No model selected");
+        if (!files?.length) throw new Error("No files to build KB");
 
-            // Add files
-            Array.from(files).forEach(file => {
-                formData.append('evidence_files', file);
-            });
-            
-            // Simulate processing delay
-            //await new Promise(resolve => setTimeout(resolve, 1000));
+        const form = new FormData();
+        for (const f of files) form.append("files", f);
+        form.append("selected_model", selectedModel);
+        form.append("kb_type", kbType); // "global" | "company"
+        form.append("batch_size", String(opts.batch_size ?? 15));
+        form.append("delay_between_batches", String(opts.delay_between_batches ?? 0.2));
+        form.append("max_retries", String(opts.max_retries ?? 3));
 
-            const response = await fetch(`${this.baseUrl}/assess-evidence`, {
-                method: 'POST',
-                body: formData
-            });
-
-            debug.log(`Evidence_Assessment API: Assessment request response status: ${response.status}`);   
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                debug.error(`API: Build request failed (${response.status})`, errorText);
-                throw new Error(`Build failed (${response.status}): ${errorText}`);
-            }
-
-            const result = await response.json();
-            debug.log('Evidence_Assessment API: Assessment response received', result);
-           
-            if (!result.success) {
-                const error = new Error(result.error_details || result.message || 'Build failed');
-                debug.error('API: Build reported failure', error);
-                throw error;
-            }
-
-            debug.log('Evidence_Assessment API: Knowledge base build completed successfully');
-            return result;
-            
-        } catch (error) {
-            debug.error('Evidence_Assessment API: Assessment failed', error);
-            throw error;
+        const url = `${this.baseUrl}/build-knowledge-base`;
+        debug.log(`API: POST ${url} (${kbType}) with ${files.length} files`);
+        const r = await fetch(url, { method: "POST", body: form });
+        if (!r.ok) {
+            const t = await r.text();
+            debug.error("API: build KB failed", t);
+            throw new Error(`Build failed (${r.status}): ${t}`);
         }
+        const data = await r.json();
+        debug.log("API: build KB resp", data);
+        if (!data.success) throw new Error(data.error_details || data.message || "Build failed");
+
+        return data;
     }
-    
-    static async buildKnowledgeBase(files, kbType) {
-        const debug = DebugConsole.getInstance();
-        const sessionModel = sessionStorage.getItem('selectedModel');
-        
-        if (!sessionModel) {
-            const error = new Error('No model selected for session');
-            debug.error('API: Build knowledge base failed - no model selected', error);
-            throw error;
-        }
-        
-        try {
-            const formData = new FormData();
-            
-            // Add files
-            Array.from(files).forEach(file => {
-                formData.append('files', file);
-            });
-            
-            // Add parameters
-            formData.append('selected_model', sessionModel);
-            formData.append('kb_type', kbType);
-            formData.append('batch_size', '15');
-            formData.append('delay_between_batches', '0.2');
-            formData.append('max_retries', '3');
-            
-            debug.log(`API: Building knowledge base - Type: ${kbType}, Model: ${sessionModel}, Files: ${files.length}`);
-            
-            const response = await fetch(`${this.baseUrl}/build-knowledge-base`, {
-                method: 'POST',
-                body: formData
-            });
-            
-            debug.log(`Build_Knowledge_Base API: Build request response status: ${response.status}`);
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                debug.error(`API: Build request failed (${response.status})`, errorText);
-                throw new Error(`Build failed (${response.status}): ${errorText}`);
-            }
-            
-            const result = await response.json();
-            debug.log('Build_Knowledge_Base API: Build response received', result);
-            
-            if (!result.success) {
-                const error = new Error(result.error_details || result.message || 'Build failed');
-                debug.error('API: Build reported failure', error);
-                throw error;
-            }
-            
-            debug.log('API: Knowledge base build completed successfully');
-            return result;
-            
-        } catch (error) {
-            debug.error('API: Build knowledge base error', error);
-            
-            if (error.message.includes('fetch')) {
-                debug.log('API: Simulating build process for testing');
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                const mockResult = {
-                    success: true,
-                    message: 'Knowledge base built successfully (simulated)',
-                    vector_count: Math.floor(Math.random() * 500) + 100,
-                    status: 'completed'
-                };
-                debug.log('API: Mock build result', mockResult);
-                return mockResult;
-            }
-            
-            throw error;
-        }
-    }
-    
+
     static async saveVectorstore(kbType, dirPath) {
         const debug = DebugConsole.getInstance();
-        
-        try {
-            const formData = new FormData();
-            formData.append('kb_type', kbType);
-            formData.append('dir_path', dirPath);
-            
-            debug.log(`API: Saving vectorstore - Type: ${kbType}, Path: ${dirPath}`);
-            
-            const response = await fetch(`${this.baseUrl}/save-vectorstore`, {
-                method: 'POST',
-                body: formData
-            });
-            
-            debug.log(`API: Save request response status: ${response.status}`);
-            
-            if (!response.ok) {
-                const errorText = await response.text();
-                debug.error(`API: Save request failed (${response.status})`, errorText);
-                
-                if (response.status === 400 && errorText.includes('No vectorstore cached')) {
-                    throw new Error(`Vectorstore not found in cache for ${kbType}. Build may have failed silently.`);
-                }
-                
-                throw new Error(`Save failed (${response.status}): ${errorText}`);
-            }
-            
-            const result = await response.json();
-            debug.log('API: Save response received', result);
-            
-            if (!result.success) {
-                const error = new Error(result.message || 'Save operation failed');
-                debug.error('API: Save reported failure', error);
-                throw error;
-            }
-            
-            debug.log('API: Vectorstore save completed successfully');
-            return result;
-            
-        } catch (error) {
-            debug.error('API: Save vectorstore error', error);
-            
-            if (error.message.includes('fetch')) {
-                debug.log('API: Simulating save process for testing');
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                const mockResult = {
-                    success: true,
-                    message: 'Vectorstore saved successfully (simulated)',
-                    path: dirPath,
-                    status: 'saved'
-                };
-                debug.log('API: Mock save result', mockResult);
-                return mockResult;
-            }
-            
-            throw error;
+        const form = new FormData();
+        form.append("kb_type", kbType);
+        form.append("dir_path", dirPath);
+        debug.log(`API: save vectorstore (${kbType}) -> ${dirPath}`);
+        const r = await fetch(`${this.baseUrl}/save-vectorstore`, { method: "POST", body: form });
+        if (!r.ok) {
+            const t = await r.text();
+            debug.error("API: save vectorstore failed", t);
+            throw new Error(`Save failed (${r.status}): ${t}`);
         }
+        const data = await r.json();
+        debug.log("API: save vectorstore resp", data);
+        if (!data.success) throw new Error(data.message || "Save failed");
+        return data;
     }
-    
-    static async checkHealth() {
+
+    static async runAssessment(files, selectedModel, maxWorkers = 4) {
         const debug = DebugConsole.getInstance();
-        
-        try {
-            debug.log('API: Checking health endpoint');
-            const response = await fetch(`${this.baseUrl}/health`);
-            const isHealthy = response.ok;
-            debug.log(`API: Health check result: ${isHealthy ? 'healthy' : 'unhealthy'}`);
-            return isHealthy;
-        } catch (error) {
-            debug.error('API: Health check failed', error);
-            return false;
+        if (!selectedModel) throw new Error("No model selected");
+        if (!files?.length) throw new Error("No files for assessment");
+
+        const form = new FormData();
+        form.append("selected_model", selectedModel);
+        form.append("max_workers", String(maxWorkers));
+        for (const f of files) form.append("evidence_files", f);
+
+        const url = `${this.baseUrl}/assess-evidence`;
+        debug.log(`API: POST ${url} with ${files.length} files`);
+        const r = await fetch(url, { method: "POST", body: form });
+        if (!r.ok) {
+            const t = await r.text();
+            debug.error("API: assess failed", t);
+            throw new Error(`Assessment failed (${r.status}): ${t}`);
         }
+        const data = await r.json();
+        debug.log("API: assessment resp", data);
+        if (!data.success) throw new Error(data.error_details || data.message || "Assessment failed");
+        return data;
+    }
+
+    static async downloadReport(filename) {
+        const debug = DebugConsole.getInstance();
+        const url = `${this.baseUrl}/download-report?filename=${encodeURIComponent(filename)}`;
+        debug.log(`API: download report ${filename}`);
+        const r = await fetch(url);
+        if (!r.ok) throw new Error(`Download failed (${r.status})`);
+        const blob = await r.blob();
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 0);
+    }
+
+    static async chat(userInput) {
+        const debug = DebugConsole.getInstance();
+        const selectedModel = sessionStorage.getItem("selectedModel");
+        if (!selectedModel) throw new Error("Please select a model before chatting.");
+
+        const payload = {
+            selected_model: selectedModel,
+            user_input: userInput, // server auto-loads saved vectorstores if present
+        };
+
+        const r = await fetch(`${this.baseUrl}/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+        if (!r.ok) {
+            const t = await r.text();
+            debug.error("API: chat failed", t);
+            throw new Error(`Chat failed (${r.status}): ${t}`);
+        }
+        const data = await r.json();
+        debug.log("API: chat resp", data);
+        if (!data.success) throw new Error(data.error || "Chat failed");
+        return data;
     }
 }
 
-// PDF Report Generator using jsPDF
-class PDFGenerator {
-    static generateAssessmentReport(assessmentData) {
-        const debug = DebugConsole.getInstance();
-        debug.log('PDF: Generating assessment report', assessmentData);
-        
-        try {
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF();
-            
-            // Header
-            doc.setFontSize(20);
-            doc.setTextColor(33, 128, 141); // Teal color
-            doc.text('Document Assessment Report', 20, 30);
-            
-            // Document info
-            doc.setFontSize(12);
-            doc.setTextColor(0, 0, 0);
-            doc.text(`Document: ${assessmentData.file_name}`, 20, 50);
-            doc.text(`Assessment Type: ${assessmentData.assessment_type}`, 20, 60);
-            doc.text(`Generated: ${new Date(assessmentData.generated_at).toLocaleString()}`, 20, 70);
-            
-            // Overall Score
-            doc.setFontSize(16);
-            doc.setTextColor(33, 128, 141);
-            doc.text('Overall Assessment Score', 20, 95);
-            
-            doc.setFontSize(24);
-            const scoreColor = assessmentData.results.overall_score >= 85 ? [34, 197, 94] : 
-                             assessmentData.results.overall_score >= 70 ? [245, 158, 11] : [239, 68, 68];
-            doc.setTextColor(...scoreColor);
-            doc.text(`${assessmentData.results.overall_score}%`, 20, 110);
-            
-            // Detailed Scores
-            doc.setFontSize(14);
-            doc.setTextColor(33, 128, 141);
-            doc.text('Detailed Scores', 20, 135);
-            
-            doc.setFontSize(12);
-            doc.setTextColor(0, 0, 0);
-            let yPos = 150;
-            doc.text(`Structure Score: ${assessmentData.results.structure_score}%`, 20, yPos);
-            doc.text(`Content Score: ${assessmentData.results.content_score}%`, 20, yPos + 15);
-            doc.text(`Format Score: ${assessmentData.results.format_score}%`, 20, yPos + 30);
-            
-            // Findings
-            yPos += 60;
-            doc.setFontSize(14);
-            doc.setTextColor(33, 128, 141);
-            doc.text('Key Findings', 20, yPos);
-            
-            doc.setFontSize(10);
-            doc.setTextColor(0, 0, 0);
-            yPos += 15;
-            
-            assessmentData.results.findings.forEach((finding, index) => {
-                const levelColors = {
-                    success: [34, 197, 94],
-                    warning: [245, 158, 11],
-                    error: [239, 68, 68],
-                    info: [59, 130, 246]
-                };
-                
-                doc.setTextColor(...(levelColors[finding.level] || [0, 0, 0]));
-                doc.text(`• ${finding.category}: `, 20, yPos);
-                doc.setTextColor(0, 0, 0);
-                const lines = doc.splitTextToSize(finding.message, 150);
-                doc.text(lines, 55, yPos);
-                yPos += lines.length * 12;
-            });
-            
-            // Recommendations
-            if (yPos > 250) {
-                doc.addPage();
-                yPos = 30;
-            } else {
-                yPos += 20;
-            }
-            
-            doc.setFontSize(14);
-            doc.setTextColor(33, 128, 141);
-            doc.text('Recommendations', 20, yPos);
-            
-            doc.setFontSize(10);
-            doc.setTextColor(0, 0, 0);
-            yPos += 15;
-            
-            assessmentData.results.recommendations.forEach((recommendation, index) => {
-                const lines = doc.splitTextToSize(`${index + 1}. ${recommendation}`, 170);
-                doc.text(lines, 20, yPos);
-                yPos += lines.length * 12;
-            });
-            
-            // Footer
-            const pageCount = doc.internal.getNumberOfPages();
-            for (let i = 1; i <= pageCount; i++) {
-                doc.setPage(i);
-                doc.setFontSize(8);
-                doc.setTextColor(128, 128, 128);
-                doc.text(`Page ${i} of ${pageCount}`, 20, 285);
-                doc.text('Generated by AI Document Management System', 120, 285);
-            }
-            
-            // Save the PDF
-            const fileName = `assessment-report-${assessmentData.assessment_id}.pdf`;
-            doc.save(fileName);
-            
-            debug.log(`PDF: Report generated and downloaded as ${fileName}`);
-            return fileName;
-            
-        } catch (error) {
-            debug.error('PDF: Failed to generate report', error);
-            throw error;
-        }
-    }
-}
+// ============ UI Manager ============
 
 class UIManager {
     constructor() {
-        this.processing = {};
-        this.files = { general: [], company: [] };
-        this.availableModels = [];
-        this.selectedModel = null;
-        this.modelLocked = false;
-        this.currentDeletion = null;
         this.debug = DebugConsole.getInstance();
-        this.maxFileSize = 10485760; // 10MB
-        this.allowedTypes = [
-            'application/pdf', 
-            'text/plain', 
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
-            'text/markdown',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        ];
-        // Track existing vectorstores
-        this.existingVectorstores = { general: null, company: null };
-        
-        // Assessment state
-        this.assessmentFile = null;
-        this.lastAssessmentResult = null;
-        this.isAssessing = false;
-    }
-    
-    async init() {
-        this.debug.log('UI: Initializing application');
-        
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                this.setupApplication();
-            });
-        } else {
-            this.setupApplication();
-        }
-    }
-    
-    async setupApplication() {
-        this.debug.log('UI: Setting up application components');
-        
-        this.loadSessionModel();
-        this.setupEventListeners();
-        this.setupDebugConsole();
-        this.updateAPIStatus(false);
-        
-        // Load models first, then check API
-        await this.loadModels();
-        await this.checkAPIConnection();
-        
-        // Check for existing vectorstores after API connection
-        await this.checkForExistingVectorstores();
-        
-        this.updateModelDisplay();
-        this.updateAllStatuses();
-        
-        this.debug.log('UI: Application setup completed');
-    }
-    
-    // Main vectorstore checking method called during initialization
-    async checkForExistingVectorstores() {
-        this.debug.log('UI: Checking for existing vectorstores during initialization');
-        
-        try {
-            const vectorstoreInfo = await DocumentAPI.checkExistingVectorstores();
-            this.existingVectorstores = vectorstoreInfo;
-            
-            // Update UI for sections with existing vectorstores
-            ['general', 'company'].forEach(sectionId => {
-                const info = vectorstoreInfo[sectionId];
-                
-                if (info && info.exists) {
-                    this.debug.log(`UI: Found existing ${sectionId} vectorstore with ${info.vector_count} vectors`);
-                    
-                    // Update build and save status
-                    this.updateStatus(sectionId, 'built', `Built successfully (${info.vector_count || 0} vectors)`);
-                    this.updateStatus(sectionId, 'saved', 'Saved to disk');
-                    
-                    // Show saved path
-                    this.showSavedPath(sectionId, info.path, info.vector_count);
-                    
-                    // Update card status to show success
-                    this.updateCardStatus(sectionId, 'success', 'Previously built & saved');
-                    
-                    // Show notification
-                    const lastModified = info.last_modified ? 
-                        new Date(info.last_modified).toLocaleDateString() : 'recently';
-                    this.showToast(
-                        `Found existing ${sectionId} vectorstore (${info.vector_count || 0} vectors, saved ${lastModified})`, 
-                        'success',
-                        4000
-                    );
-                } else {
-                    this.debug.log(`UI: No existing ${sectionId} vectorstore found`);
-                }
-            });
-            
-        } catch (error) {
-            this.debug.error('UI: Failed to check existing vectorstores', error);
-            // Don't show error to user as this is not critical
-        }
-    }
-    
-    setupDebugConsole() {
-        const debugToggle = document.getElementById('debug-toggle');
-        const debugPanel = document.getElementById('debug-panel');
-        const debugClose = document.getElementById('debug-close');
-        const debugClear = document.getElementById('debug-clear');
-        const debugDownload = document.getElementById('debug-download');
-        
-        if (debugToggle && debugPanel) {
-            debugToggle.addEventListener('click', () => {
-                debugPanel.classList.toggle('hidden');
-            });
-        }
-        
-        if (debugClose && debugPanel) {
-            debugClose.addEventListener('click', () => {
-                debugPanel.classList.add('hidden');
-            });
-        }
-        
-        if (debugClear) {
-            debugClear.addEventListener('click', () => {
-                this.debug.clear();
-            });
-        }
-        
-        if (debugDownload) {
-            debugDownload.addEventListener('click', () => {
-                this.debug.downloadLogs();
-            });
-        }
-    }
-    
-    async checkAPIConnection() {
-        this.debug.log('UI: Checking API connection');
-        const isHealthy = await DocumentAPI.checkHealth();
-        this.updateAPIStatus(isHealthy);
-        
-        if (!isHealthy) {
-            this.showToast('API server not available. Using demo mode with mock data.', 'warning', 6000);
-        } else {
-            this.showToast('Connected to API server successfully', 'success');
-        }
-    }
-
-    updateCardStatus(sectionId, statusType, message) {
-        const statusContainer = document.getElementById(`${sectionId}-status`);
-        if (!statusContainer) {
-            this.debug.error(`Status container not found: ${sectionId}-status`);
-            return;
-        }
-        
-        const statusElement = statusContainer.querySelector('.status');
-        if (!statusElement) {
-            this.debug.error(`Status element not found in: ${sectionId}-status`);
-            return;
-        }
-        
-        // Update text
-        statusElement.textContent = message;
-        
-        // Update classes
-        statusElement.className = `status status--${statusType}`;
-        
-        this.debug.log(`Updated ${sectionId} card status: ${message} (${statusType})`);
-    }
-    
-    updateAPIStatus(isHealthy) {
-        const statusIndicator = document.getElementById('status-indicator');
-        const statusText = document.getElementById('status-text');
-        
-        if (statusIndicator && statusText) {
-            if (isHealthy) {
-                statusIndicator.textContent = '🟢';
-                statusText.textContent = 'API Connected';
-            } else {
-                statusIndicator.textContent = '🔴';
-                statusText.textContent = 'API Disconnected';
-            }
-        }
-    }
-    
-    loadSessionModel() {
-        const storedModel = sessionStorage.getItem('selectedModel');
-        if (storedModel) {
-            this.selectedModel = storedModel;
-            this.modelLocked = true;
-            this.debug.log(`UI: Loaded session model: ${storedModel}`);
-        }
-    }
-    
-    validateSessionModel() {
-        const model = sessionStorage.getItem('selectedModel');
-        if (!model) {
-            this.showToast('No model selected. Please select a model first.', 'error');
-            return false;
-        }
-        
-        if (!this.availableModels.includes(model)) {
-            this.showToast('Selected model is no longer available. Please select a new model.', 'error');
-            this.resetModelSelection();
-            return false;
-        }
-        
-        return true;
-    }
-    
-    resetModelSelection() {
-        this.selectedModel = null;
+        this.availableModels = [];
         this.modelLocked = false;
-        sessionStorage.removeItem('selectedModel');
-        this.updateModelDisplay();
-        this.updateAllStatuses();
+
+        // Files
+        this.files = { general: [], company: [] };
+        this.assessmentFiles = [];
+
+        // Chat
+        this.chatHistory = []; // store objects {role:'user'|'assistant', text:'...'}
     }
-    
+
+    // ---------- Init ----------
+    async init() {
+        this.setupNav();
+        this.setupModelUI();
+        this.setupUploads();
+        this.setupAssessmentUI();
+        this.setupChatUI();
+
+        const apiHealthy = await DocumentAPI.checkHealth();
+        this.markAPIStatus(apiHealthy);
+
+        await this.loadModels();
+        this.restoreSessionModel();
+
+        // NEW: Detect & load saved vectorstores into server cache, then reflect in UI
+        if (apiHealthy) {
+            await this.detectAndLoadVectorstores();
+        }
+
+        this.syncBuildButtons();
+        this.syncAssessmentButtons();
+        this.syncChatModelChip(); // ensure pill shows current model
+    }
+
+    _ext(name) {
+        const parts = String(name).split(".");
+        return parts.length > 1 ? parts.pop().toUpperCase() : "";
+    }
+
+    _fileEmoji(name) {
+        const ext = this._ext(name).toLowerCase();
+        switch (ext) {
+            case "pdf": return "📄";
+            case "txt": return "📝";
+            case "doc":
+            case "docx": return "📃";
+            case "csv": return "🧾";
+            case "xlsx": return "📊";
+            case "md": return "🗒️";
+            default: return "📁";
+        }
+    }
+
+
+    // ---------- Helpers ----------
+    $(id) { return document.getElementById(id); }
+    showToast(msg, type = "info") {
+        console[type === "error" ? "error" : "log"]("TOAST:", msg);
+    }
+    markAPIStatus(ok) {
+        const el = this.$("api-status");
+        if (!el) return;
+        const ind = el.querySelector(".status-indicator");
+        const txt = el.querySelector(".status-text");
+        if (ind) ind.textContent = ok ? "🟢" : "🔴";
+        if (txt) txt.textContent = ok ? "Connected" : "Offline (using fallbacks)";
+    }
+
+    // ---------- Navigation ----------
+    setupNav() {
+        const links = document.querySelectorAll(".nav-link");
+        links.forEach(btn => {
+            btn.addEventListener("click", () => {
+                links.forEach(b => b.classList.remove("active"));
+                btn.classList.add("active");
+                const tab = btn.getAttribute("data-tab");
+                document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+                const panel = this.$(tab);
+                if (panel) panel.classList.add("active");
+
+                // When switching to Chat, ensure pill updates
+                if (tab === "document-chat") this.syncChatModelChip();
+            });
+        });
+    }
+
+    // ---------- Model Selection ----------
     async loadModels() {
-        this.debug.log('UI: Loading available models');
-        this.showModelLoading(true);
-        
-        try {
-            const models = await DocumentAPI.getModels();
-            this.availableModels = Array.isArray(models) ? models : [];
-            
-            // Small delay to show loading state
-            await new Promise(resolve => setTimeout(resolve, 500));
-            
-            this.populateModelSelect();
-            this.validateCurrentModel();
-            
-            if (this.availableModels.length === 0) {
-                this.showToast('No Ollama models available. Please ensure Ollama is running and models are installed.', 'error');
-            } else {
-                this.debug.log(`UI: Loaded ${this.availableModels.length} models`);
-                this.showToast(`Loaded ${this.availableModels.length} available models`, 'success');
-            }
-        } catch (error) {
-            this.debug.error('UI: Failed to load models', error);
-            this.showToast(`Failed to load models: ${error.message}`, 'error');
-            this.availableModels = [];
-            this.populateModelSelect();
-        } finally {
-            this.showModelLoading(false);
-        }
-    }
-    
-    showModelLoading(isLoading) {
-        const sessionModelSelect = document.getElementById('session-model-select');
-        if (!sessionModelSelect) return;
-        
-        if (isLoading) {
-            sessionModelSelect.innerHTML = '<option value="">Loading models...</option>';
-            sessionModelSelect.disabled = true;
-        }
-    }
-    
-    validateCurrentModel() {
-        if (this.selectedModel && !this.availableModels.includes(this.selectedModel)) {
-            this.debug.log(`UI: Current model ${this.selectedModel} no longer available`);
-            this.resetModelSelection();
-            this.showToast('Previously selected model is no longer available. Please select a new model.', 'warning');
-        }
-    }
-    
-    populateModelSelect() {
-        const sessionModelSelect = document.getElementById('session-model-select');
-        const modelValidation = document.getElementById('model-validation');
-        
-        if (!sessionModelSelect) return;
-        
-        if (this.availableModels.length === 0) {
-            sessionModelSelect.innerHTML = '<option value="">No models available</option>';
-            sessionModelSelect.disabled = true;
-            
-            if (modelValidation) {
-                modelValidation.innerHTML = '<div class="model-validation error">⚠️ No Ollama models found. Please ensure Ollama is running and models are installed.</div>';
-            }
+        const select = this.$("session-model-select");
+        if (!select) return;
+        const models = await DocumentAPI.getModels();
+        this.availableModels = models;
+        select.innerHTML = "";
+        if (!models.length) {
+            const opt = document.createElement("option");
+            opt.value = ""; opt.textContent = "No models found";
+            select.appendChild(opt);
         } else {
-            sessionModelSelect.innerHTML = '<option value="">Select Ollama Model...</option>' + 
-                this.availableModels.map(model => 
-                    `<option value="${model}">${model}</option>`
-                ).join('');
-            sessionModelSelect.disabled = this.modelLocked;
-            
-            if (modelValidation) {
-                if (this.modelLocked && this.selectedModel) {
-                    modelValidation.innerHTML = `<div class="model-validation success">✅ Model "${this.selectedModel}" is locked for this session</div>`;
-                } else {
-                    modelValidation.innerHTML = `<div class="model-validation warning">⚠️ Please select a model to enable document processing</div>`;
-                }
-            }
+            select.appendChild(new Option("Select a model…", ""));
+            for (const m of models) select.appendChild(new Option(m, m));
         }
     }
-    
+
+    setupModelUI() {
+        const select = this.$("session-model-select");
+        const changeBtn = this.$("change-model-btn");
+        if (select) {
+            select.addEventListener("change", e => {
+                const m = e.target.value?.trim();
+                if (!m) return;
+                this.selectModel(m);
+                this.syncChatModelChip(); // Null-safe update for chat pill
+            });
+        }
+        if (changeBtn) {
+            changeBtn.addEventListener("click", () => {
+                sessionStorage.removeItem("selectedModel");
+                this.modelLocked = false;
+                this.updateModelDisplay();
+                this.syncBuildButtons();
+                this.syncAssessmentButtons();
+                this.syncChatModelChip();
+            });
+        }
+    }
+
+    selectModel(model) {
+        sessionStorage.setItem("selectedModel", model);
+        this.modelLocked = true;
+        this.updateModelDisplay();
+        this.syncBuildButtons();
+        this.syncAssessmentButtons();
+        this.syncChatModelChip();
+    }
+
+    restoreSessionModel() {
+        const saved = sessionStorage.getItem("selectedModel");
+        if (saved) {
+            this.modelLocked = true;
+            const sel = this.$("session-model-select");
+            if (sel) sel.value = saved;
+        }
+        this.updateModelDisplay();
+    }
+
     updateModelDisplay() {
-        const modelSelector = document.getElementById('model-selector');
-        const selectedModelDisplay = document.getElementById('selected-model-display');
-        const selectedModelName = document.getElementById('selected-model-name');
-        
-        if (this.modelLocked && this.selectedModel) {
-            if (modelSelector) modelSelector.style.display = 'none';
-            if (selectedModelDisplay) selectedModelDisplay.style.display = 'flex';
-            if (selectedModelName) selectedModelName.textContent = this.selectedModel;
+        const selected = sessionStorage.getItem("selectedModel");
+        const initialSel = this.$("initial-model-selector");
+        const selectedView = this.$("selected-model-display");
+        const name = this.$("selected-model-name");
+        const hintGeneral = this.$("general-build-hint");
+        const hintCompany = this.$("company-build-hint");
+        const hintAssess = this.$("assessment-build-hint");
+
+        if (selected && this.modelLocked) {
+            if (initialSel) initialSel.style.display = "none";
+            if (selectedView) selectedView.style.display = "";
+            if (name) name.textContent = selected;
+            if (hintGeneral) hintGeneral.textContent = "Ready to build";
+            if (hintCompany) hintCompany.textContent = "Ready to build";
+            if (hintAssess) hintAssess.textContent = "Ready to assess";
         } else {
-            if (modelSelector) modelSelector.style.display = 'flex';
-            if (selectedModelDisplay) selectedModelDisplay.style.display = 'none';
+            if (initialSel) initialSel.style.display = "";
+            if (selectedView) selectedView.style.display = "none";
+            if (name) name.textContent = "";
+            if (hintGeneral) hintGeneral.textContent = "Select a model above to enable building";
+            if (hintCompany) hintCompany.textContent = "Select a model above to enable building";
+            if (hintAssess) hintAssess.textContent = "Select a model above to enable assessment";
+        }
+        this.syncChatModelChip();
+    }
+
+    validateSessionModel() {
+        const m = sessionStorage.getItem("selectedModel");
+        return !!m;
+    }
+
+    // Null-safe: updates the chat model pill if present
+    syncChatModelChip() {
+        const chip =
+            this.$("chat-active-model") ||
+            this.$("chat-model-chip") ||
+            this.$("selected-model-name"); // fallback
+        if (!chip) return;
+        chip.textContent = sessionStorage.getItem("selectedModel") || "—";
+    }
+
+    // ---------- NEW: Detect & load saved vectorstores on init ----------
+    async detectAndLoadVectorstores() {
+        try {
+            const preferred = sessionStorage.getItem("selectedModel") || null;
+            const res = await DocumentAPI.checkExistingVectorstores(preferred);
+
+            // Update UI for GLOBAL (general)
+            this._reflectKBStatus("general", res.general);
+            // Update UI for COMPANY
+            this._reflectKBStatus("company", res.company);
+
+            // Small toast summary
+            const loaded = ["general", "company"].filter(k => res[k].exists).length;
+            if (loaded > 0) {
+                this.showToast(`Loaded ${loaded} saved knowledge base${loaded > 1 ? "s" : ""} into cache.`, "success");
+            } else {
+                this.showToast("No saved knowledge bases found.", "info");
+            }
+        } catch (e) {
+            this.debug.error("Detect/load vectorstores failed", e);
         }
     }
-    
-    setupEventListeners() {
-        this.debug.log('UI: Setting up event listeners');
-        
-        // Tab switching
-        const navLinks = document.querySelectorAll('.nav-link');
-        navLinks.forEach(link => {
-            link.addEventListener('click', (e) => {
-                e.preventDefault();
-                const tabId = e.currentTarget.dataset.tab;
-                this.switchTab(tabId);
-            });
-        });
-        
-        // Model selection
-        const sessionModelSelect = document.getElementById('session-model-select');
-        if (sessionModelSelect) {
-            sessionModelSelect.addEventListener('change', (e) => {
-                const selectedModel = e.target.value;
-                if (selectedModel) {
-                    this.selectedModel = selectedModel;
-                    this.modelLocked = true;
-                    sessionStorage.setItem('selectedModel', selectedModel);
-                    this.updateModelDisplay();
-                    this.updateAllStatuses();
-                    this.populateModelSelect();
-                    this.showToast(`Model "${selectedModel}" selected and locked for session`, 'success');
-                    this.debug.log(`UI: Model selected and locked: ${selectedModel}`);
-                }
-            });
+
+    _reflectKBStatus(kind, info) {
+        // kind: "general" | "company"
+        const kbStatus = this.$(`${kind}-kb-status`);
+        const vecCount = this.$(`${kind}-vector-count`);
+        const savePathItem = this.$(`${kind}-save-path-item`);
+        const savePath = this.$(`${kind}-save-path`);
+
+        if (info.exists) {
+            if (kbStatus) kbStatus.textContent = "Loaded";
+            if (vecCount) vecCount.textContent = String(info.vector_count ?? 0);
+            if (savePath) savePath.textContent = info.path || "";
+            if (savePathItem) savePathItem.style.display = "";
+        } else {
+            if (kbStatus) kbStatus.textContent = "Not found";
+            if (vecCount) vecCount.textContent = "0";
+            if (savePath) savePath.textContent = "";
+            if (savePathItem) savePathItem.style.display = "none";
         }
-        
-        // Change model button
-        const changeModelBtn = document.getElementById('change-model-btn');
-        if (changeModelBtn) {
-            changeModelBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.resetModelSelection();
-                this.populateModelSelect();
-                this.showToast('Model selection cleared. Please select a new model.', 'info');
-                this.debug.log('UI: Model selection cleared');
-            });
-        }
-        
-        // File inputs
-        this.setupFileInputs();
-        
-        // Drag and drop
-        this.setupDragAndDrop('general-upload-area', 'general');
-        this.setupDragAndDrop('company-upload-area', 'company');
-        
-        // Assessment drag and drop
-        this.setupAssessmentDragAndDrop();
-        
-        // Build buttons
-        this.setupBuildButtons();
-        
-        // Assessment buttons
-        this.setupAssessmentButtons();
-        
-        // Modal handlers
-        this.setupModalHandlers();
-        
-        // Browse buttons
-        this.setupBrowseButtons();
     }
-    
-    // Assessment event handlers
-    setupAssessmentDragAndDrop() {
-        const area = document.getElementById('assessment-upload-area');
+
+    // ---------- Uploads (General/Company) ----------
+    setupUploads() {
+        this._wireDropZone("general-upload-area", "general", "general-docs-container", "general-count");
+        this._wireDropZone("company-upload-area", "company", "company-docs-container", "company-count");
+
+        const generalBtn = this.$("general-build-btn");
+        const companyBtn = this.$("company-build-btn");
+        if (generalBtn) generalBtn.addEventListener("click", () => this.handleBuildKB("general"));
+        if (companyBtn) companyBtn.addEventListener("click", () => this.handleBuildKB("company"));
+
+        const generalClear = this.$("general-clear-files");
+        if (generalClear) {
+            generalClear.addEventListener("click", () => {
+                this.files.general = [];
+                this._renderFileList("general", "general-docs-container", "general-count");
+                this.syncBuildButtons();
+            });
+        }
+
+        const companyClear = this.$("company-clear-files");
+        if (companyClear) {
+            companyClear.addEventListener("click", () => {
+                this.files.company = [];
+                this._renderFileList("company", "company-docs-container", "company-count");
+                this.syncBuildButtons();
+            });
+        }
+
+    }
+
+    _wireDropZone(areaId, bucket, listId, countId) {
+        const area = this.$(areaId);
         if (!area) return;
-        
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            area.addEventListener(eventName, (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-            });
+
+        const fileInput = document.createElement("input");
+        fileInput.type = "file";
+        fileInput.multiple = true;
+        fileInput.accept = ".pdf,.txt,.doc,.docx,.md,.csv,.xlsx";
+        fileInput.style.display = "none";
+        document.body.appendChild(fileInput);
+
+        const browseBtn = area.querySelector(".upload-link");
+        if (browseBtn) browseBtn.addEventListener("click", (e) => {
+            e.preventDefault();
+            fileInput.click();
         });
-        
-        area.addEventListener('dragover', () => {
-            area.classList.add('drag-over');
+
+        area.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            area.classList.add("dragging");
         });
-        
-        area.addEventListener('dragleave', (e) => {
-            if (!area.contains(e.relatedTarget)) {
-                area.classList.remove('drag-over');
-            }
+        area.addEventListener("dragleave", () => area.classList.remove("dragging"));
+        area.addEventListener("drop", (e) => {
+            e.preventDefault();
+            area.classList.remove("dragging");
+            const files = Array.from(e.dataTransfer.files || []);
+            this._addFiles(bucket, files, listId, countId);
         });
-        
-        area.addEventListener('drop', (e) => {
-            area.classList.remove('drag-over');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                this.handleAssessmentFileSelection(files[0]);
-            }
-        });
-        
-        area.addEventListener('click', (e) => {
-            if (e.target.classList.contains('upload-link') || e.target.closest('.upload-link')) {
-                return;
-            }
-            const fileInput = document.getElementById('assessment-file-input');
-            if (fileInput) {
-                fileInput.click();
-            }
+
+        fileInput.addEventListener("change", (e) => {
+            const files = Array.from(e.target.files || []);
+            this._addFiles(bucket, files, listId, countId);
+            fileInput.value = ""; // reset
         });
     }
-    
-    setupAssessmentButtons() {
-        // Assessment file input
-        const assessmentFileInput = document.getElementById('assessment-file-input');
-        if (assessmentFileInput) {
-            assessmentFileInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    this.handleAssessmentFileSelection(e.target.files[0]);
-                }
-                e.target.value = '';
-            });
-        }
-        
-        // Assessment browse button
-        const assessmentUploadArea = document.getElementById('assessment-upload-area');
-        if (assessmentUploadArea) {
-            const browseBtn = assessmentUploadArea.querySelector('.upload-link');
-            if (browseBtn) {
-                browseBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this.debug.log('UI: Assessment browse button clicked');
-                    assessmentFileInput.click();
-                });
-            }
-        }
-        
-        // Remove file button
-        const removeFileBtn = document.getElementById('assessment-remove-file');
-        if (removeFileBtn) {
-            removeFileBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.removeAssessmentFile();
-            });
-        }
-        
-        // Run assessment button
-        const runAssessmentBtn = document.getElementById('run-assessment-btn');
-        if (runAssessmentBtn) {
-            runAssessmentBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                if (!runAssessmentBtn.disabled && this.assessmentFile) {
-                    this.runAssessment();
-                }
-            });
-        }
-        
-        // Download report button
-        const downloadReportBtn = document.getElementById('download-report-btn');
-        if (downloadReportBtn) {
-            downloadReportBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.downloadAssessmentReport();
-            });
-        }
+
+    _addFiles(bucket, files, listId, countId) {
+        if (!files?.length) return;
+        this.files[bucket].push(...files);
+        this._renderFileList(bucket, listId, countId);
+        this.syncBuildButtons();
     }
-    
-    handleAssessmentFileSelection(file) {
-        this.debug.log('UI: Assessment file selected', { name: file.name, size: file.size });
-        
-        // Validate file
-        const maxSize = 25 * 1024 * 1024; // 25MB
-        if (file.size > maxSize) {
-            this.showToast('File is too large. Maximum size is 25MB.', 'error');
+
+    _renderFileList(bucket, listId, countId) {
+        const cont = this.$(listId);
+        const countEl = this.$(countId);
+        const items = this.files[bucket];
+
+        const clearBtn = this.$(`${bucket}-clear-files`);
+        if (clearBtn) clearBtn.style.display = items.length ? "" : "none";
+
+
+        if (countEl) {
+            countEl.textContent = items.length
+                ? `${items.length} file(s) ready`
+                : "No documents uploaded yet";
+        }
+        if (!cont) return;
+
+        cont.classList.add("document-list");
+        cont.innerHTML = "";
+
+        if (!items.length) {
+            cont.innerHTML = `<p class="no-docs">No documents uploaded yet</p>`;
             return;
         }
-        
-        const allowedExtensions = ['.pdf', '.txt', '.docx', '.md', '.xlsx'];
-        const extension = file.name.toLowerCase().substring(file.name.lastIndexOf('.'));
-        if (!allowedExtensions.includes(extension)) {
-            this.showToast('Unsupported file format. Please use PDF, TXT, DOCX, MD, or XLSX.', 'error');
-            return;
-        }
-        
-        // Store file and update UI
-        this.assessmentFile = file;
-        this.updateAssessmentFileDisplay();
-        this.updateAssessmentStatus();
-        
-        this.showToast(`File "${file.name}" uploaded successfully`, 'success');
+
+        items.forEach((f, idx) => {
+            const item = document.createElement("div");
+            item.className = "doc-item";
+            item.innerHTML = `
+      <div class="doc-left">
+        <div class="doc-icon">${this._fileEmoji(f.name)}</div>
+        <div class="doc-meta">
+          <div class="doc-name" title="${this._escape(f.name)}">${this._escape(f.name)}</div>
+          <div class="doc-sub">${this._ext(f.name) || "FILE"} · ${this._prettyBytes(f.size)}</div>
+        </div>
+      </div>
+      <div class="doc-right">#${idx + 1}</div>
+    `;
+            cont.appendChild(item);
+        });
     }
-    
-    updateAssessmentFileDisplay() {
-        const uploadArea = document.getElementById('assessment-upload-area');
-        const fileDisplay = document.getElementById('assessment-file-display');
-        const fileName = document.getElementById('assessment-file-name');
-        const fileDetails = document.getElementById('assessment-file-details');
-        const fileIcon = document.getElementById('assessment-file-icon');
-        const fileStatus = document.getElementById('assessment-file-status');
-        
-        if (this.assessmentFile) {
-            // Hide upload area, show file display
-            if (uploadArea) uploadArea.style.display = 'none';
-            if (fileDisplay) fileDisplay.style.display = 'block';
-            
-            // Update file info
-            if (fileName) fileName.textContent = this.assessmentFile.name;
-            if (fileDetails) {
-                const size = this.formatFileSize(this.assessmentFile.size);
-                fileDetails.textContent = `${size} • Uploaded ${new Date().toLocaleDateString()}`;
-            }
-            if (fileIcon) fileIcon.textContent = this.getFileIcon(this.assessmentFile.name);
-            if (fileStatus) fileStatus.textContent = 'File ready for assessment';
-        } else {
-            // Show upload area, hide file display
-            if (uploadArea) uploadArea.style.display = 'block';
-            if (fileDisplay) fileDisplay.style.display = 'none';
-            if (fileStatus) fileStatus.textContent = 'No file uploaded';
-        }
+
+
+    _prettyBytes(n) {
+        if (!n && n !== 0) return "";
+        const u = ["B", "KB", "MB", "GB", "TB"];
+        const i = Math.floor(Math.log(n) / Math.log(1024));
+        return `${(n / Math.pow(1024, i)).toFixed(1)} ${u[i]}`;
     }
-    
-    removeAssessmentFile() {
-        this.assessmentFile = null;
-        this.lastAssessmentResult = null;
-        this.updateAssessmentFileDisplay();
-        this.updateAssessmentStatus();
-        this.showToast('File removed', 'info');
-        this.debug.log('UI: Assessment file removed');
+
+    syncBuildButtons() {
+        const selected = this.validateSessionModel();
+        const genBtn = this.$("general-build-btn");
+        const comBtn = this.$("company-build-btn");
+        if (genBtn) genBtn.disabled = !(selected && this.files.general.length);
+        if (comBtn) comBtn.disabled = !(selected && this.files.company.length);
     }
-    
-    updateAssessmentStatus() {
-        const runBtn = document.getElementById('run-assessment-btn');
-        const hint = document.getElementById('assessment-hint');
-        const progressStatus = document.getElementById('assessment-progress-status');
-        const reportStatus = document.getElementById('report-status');
-        const reportDownloadItem = document.getElementById('report-download-item');
-        const assessmentStatus = document.getElementById('assessment-status');
-        
-        if (this.isAssessing) {
-            if (runBtn) {
-                runBtn.disabled = true;
-                runBtn.textContent = 'Running Assessment...';
-            }
-            if (hint) hint.textContent = 'Assessment in progress...';
-            if (progressStatus) progressStatus.textContent = 'Running assessment...';
-            if (assessmentStatus) {
-                const statusEl = assessmentStatus.querySelector('.status');
-                if (statusEl) {
-                    statusEl.textContent = 'Assessment in progress...';
-                    statusEl.className = 'status status--warning';
-                }
-            }
-        } else if (this.assessmentFile) {
-            if (runBtn) {
-                runBtn.disabled = false;
-                runBtn.innerHTML = '📊 Run Assessment';
-            }
-            if (hint) hint.textContent = 'Ready to run assessment';
-            if (progressStatus) progressStatus.textContent = 'Ready';
-            if (assessmentStatus) {
-                const statusEl = assessmentStatus.querySelector('.status');
-                if (statusEl) {
-                    statusEl.textContent = 'Ready for assessment';
-                    statusEl.className = 'status status--info';
-                }
-            }
-        } else {
-            if (runBtn) {
-                runBtn.disabled = true;
-                runBtn.innerHTML = '📊 Run Assessment';
-            }
-            if (hint) hint.textContent = 'Upload a file to enable assessment';
-            if (progressStatus) progressStatus.textContent = 'No file uploaded';
-            if (assessmentStatus) {
-                const statusEl = assessmentStatus.querySelector('.status');
-                if (statusEl) {
-                    statusEl.textContent = 'Upload a document to begin';
-                    statusEl.className = 'status status--info';
-                }
-            }
-        }
-        
-        // Report status
-        if (this.lastAssessmentResult) {
-            if (reportStatus) reportStatus.textContent = 'Report ready';
-            if (reportDownloadItem) reportDownloadItem.style.display = 'block';
-        } else {
-            if (reportStatus) reportStatus.textContent = 'Not generated';
-            if (reportDownloadItem) reportDownloadItem.style.display = 'none';
-        }
-    }
-    
-    async runAssessment() {
-        if (!this.assessmentFile || this.isAssessing) return;
-        
-        this.debug.log('UI: Starting assessment process');
-        this.isAssessing = true;
-        this.updateAssessmentStatus();        
-       
-        // Show progress card
-        this.showAssessmentProgress();
-        
-        try {            
-            
-            // Run actual assessment
-            const result = await DocumentAPI.runAssessment([this.assessmentFile]);
-            this.lastAssessmentResult = result;
-            
-            // Hide progress card
-            this.hideAssessmentProgress();
-            
+
+    async handleBuildKB(kind) {
+        try {
+            const btn = this.$(kind === "general" ? "general-build-btn" : "company-build-btn");
+            if (btn) { btn.disabled = true; btn.textContent = "Building…"; }
+            const selected = sessionStorage.getItem("selectedModel");
+            const files = this.files[kind];
+            const kbType = (kind === "general") ? "global" : "company";
+            const saveDir = (kbType === "global") ? "saved_global_vectorstore" : "saved_company_vectorstore";
+
+            const buildRes = await DocumentAPI.buildKnowledgeBase(files, kbType, selected);
+            await DocumentAPI.saveVectorstore(kbType, saveDir);
+
             // Update status
-            this.isAssessing = false;
-            this.updateAssessmentStatus();
-            
-            // Update card status
-            const assessmentStatus = document.getElementById('assessment-status');
-            if (assessmentStatus) {
-                const statusEl = assessmentStatus.querySelector('.status');
-                if (statusEl) {
-                    statusEl.textContent = `Assessment complete (Score: ${result.results.overall_score}%)`;
-                    statusEl.className = 'status status--success';
-                }
-            }
-            
-            this.showToast(`Assessment completed with score: ${result.results.overall_score}%`, 'success');
-            
-        } catch (error) {
-            this.debug.error('UI: Assessment failed', error);
-            this.isAssessing = false;
-            this.hideAssessmentProgress();
-            this.updateAssessmentStatus();
-            this.showToast(`Assessment failed: ${error.message}`, 'error');
-        }
-    }
-    
-    showAssessmentProgress() {
-        const progressCard = document.getElementById('assessment-progress-card');
-        if (progressCard) {
-            progressCard.style.display = 'block';
-            progressCard.scrollIntoView({ behavior: 'smooth' });
-        }
-    }
-    
-    hideAssessmentProgress() {
-        const progressCard = document.getElementById('assessment-progress-card');
-        if (progressCard) {
-            setTimeout(() => {
-                progressCard.style.display = 'none';
-            }, 2000);
-        }
-    }
-    
-    updateAssessmentProgress(progress, title, description) {
-        const progressFill = document.getElementById('assessment-progress-fill');
-        const progressTitle = document.getElementById('assessment-progress-title');
-        const progressDescription = document.getElementById('assessment-progress-description');
-        const steps = document.querySelectorAll('.progress-step');
-        
-        if (progressFill) progressFill.style.width = `${progress}%`;
-        if (progressTitle) progressTitle.textContent = title;
-        if (progressDescription) progressDescription.textContent = description;
-        
-        // Update step indicators
-        steps.forEach((step, index) => {
-            const stepProgress = (index + 1) * 25;
-            if (progress >= stepProgress) {
-                step.classList.add('completed');
-                step.classList.remove('active');
-            } else if (progress >= stepProgress - 25) {
-                step.classList.add('active');
-                step.classList.remove('completed');
-            } else {
-                step.classList.remove('active', 'completed');
-            }
-        });
-    }
-    
-    downloadAssessmentReport() {
-        if (!this.lastAssessmentResult) {
-            this.showToast('No assessment report available', 'error');
-            return;
-        }
-        
-        try {
-            const fileName = PDFGenerator.generateAssessmentReport(this.lastAssessmentResult);
-            this.showToast(`Report downloaded as ${fileName}`, 'success');
-            this.debug.log('UI: Assessment report downloaded', fileName);
-        } catch (error) {
-            this.debug.error('UI: Failed to download report', error);
-            this.showToast(`Failed to download report: ${error.message}`, 'error');
-        }
-    }
-    
-    setupFileInputs() {
-        const generalInput = document.getElementById('general-file-input');
-        const companyInput = document.getElementById('company-file-input');
-        
-        if (generalInput) {
-            generalInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    this.handleFileSelection(e.target.files, 'general');
-                }
-                e.target.value = '';
-            });
-        }
-        
-        if (companyInput) {
-            companyInput.addEventListener('change', (e) => {
-                if (e.target.files.length > 0) {
-                    this.handleFileSelection(e.target.files, 'company');
-                }
-                e.target.value = '';
-            });
-        }
-    }
-    
-    setupBuildButtons() {
-        const generalBuildBtn = document.getElementById('general-build-btn');
-        const companyBuildBtn = document.getElementById('company-build-btn');
-        
-        if (generalBuildBtn) {
-            generalBuildBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                if (!generalBuildBtn.disabled && this.validateSessionModel()) {
-                    this.buildAndSaveKnowledgeBase('general');
-                }
-            });
-        }
-        
-        if (companyBuildBtn) {
-            companyBuildBtn.addEventListener('click', (e) => {
-                e.preventDefault();
-                if (!companyBuildBtn.disabled && this.validateSessionModel()) {
-                    this.buildAndSaveKnowledgeBase('company');
-                }
-            });
-        }
-    }
-    
-    setupModalHandlers() {
-        const cancelDelete = document.getElementById('cancel-delete');
-        const confirmDelete = document.getElementById('confirm-delete');
-        
-        if (cancelDelete) {
-            cancelDelete.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.hideModal('delete-modal');
-            });
-        }
-        
-        if (confirmDelete) {
-            confirmDelete.addEventListener('click', (e) => {
-                e.preventDefault();
-                this.confirmDelete();
-            });
-        }
-        
-        // Click outside modal to close
-        document.querySelectorAll('.modal').forEach(modal => {
-            modal.addEventListener('click', (e) => {
-                if (e.target === modal) {
-                    this.hideModal(modal.id);
-                }
-            });
-        });
-    }
-    
-    async buildAndSaveKnowledgeBase(sectionId) {
-        if (this.processing[sectionId]) {
-            this.debug.log(`UI: ${sectionId} is already processing, skipping...`);
-            return;
-        }
-        
-        const files = this.files[sectionId];
-        if (files.length === 0) {
-            this.showToast('Please upload files first', 'error');
-            return;
-        }
-        
-        if (!this.selectedModel) {
-            this.showToast('Please select a model first', 'error');
-            return;
-        }
-        
-        const config = {
-            general: { kbType: 'global', savePath: 'saved_global_vectorstore' },
-            company: { kbType: 'company', savePath: 'saved_company_vectorstore' }
-        };
-        
-        const { kbType, savePath } = config[sectionId];
-        
-        this.processing[sectionId] = true;
-        this.updateBuildButton(sectionId, true);
-        
-        // Show processing modal
-        this.showProcessingModal(sectionId, this.selectedModel);
-        
-        try {
-            // Phase 1: Build Knowledge Base
-            this.debug.log(`UI: Starting build for ${sectionId}...`);
-            this.updateCardStatus(sectionId, 'warning', 'Building knowledge base...');
-            this.updateStatus(sectionId, 'building', 'Building knowledge base...');
-            this.updateProcessingModal('Building knowledge base...', '⚙️', 30);
-            
-            const fileObjects = this.files[sectionId].map(doc => doc.file || new File(['test content'], doc.name, { type: doc.type }));
-            const buildResult = await this.callBuildAPI(fileObjects, kbType);
-            
-            this.debug.log(`UI: Build completed for ${sectionId}:`, buildResult);
-            
-            if (!buildResult || !buildResult.success) {
-                throw new Error('Build completed but reported failure');
-            }
-            
-            const vectorCount = buildResult.vector_count || 0;
-            this.updateStatus(sectionId, 'built', `Built successfully (${vectorCount} vectors)`);
-            this.updateProcessingModal('Knowledge base built successfully', '✅', 60);
-            
-            // Small delay to ensure vectorstore is cached
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Phase 2: Save Vectorstore
-            this.debug.log(`UI: Starting save for ${sectionId}...`);
-            this.updateStatus(sectionId, 'saving', 'Saving to disk...');
-            this.updateProcessingModal('Saving vectorstore to disk...', '💾', 80);
-            
-            const saveResult = await this.callSaveAPI(kbType, savePath);
-            
-            this.debug.log(`UI: Save completed for ${sectionId}:`, saveResult);
-            
-            if (!saveResult || !saveResult.success) {
-                throw new Error('Save completed but reported failure');
-            }
-            
-            // Success
-            this.updateStatus(sectionId, 'completed', 'Built & saved successfully');
-            this.updateCardStatus(sectionId, 'success', 'Built & saved successfully');
-            this.showSavedPath(sectionId, saveResult.path || savePath, vectorCount);
-            this.updateProcessingModal('Knowledge base built and saved successfully!', '🎉', 100);
-            
-            // Update vectorstore tracking
-            this.existingVectorstores[sectionId] = {
-                exists: true,
-                path: saveResult.path || savePath,
-                vector_count: vectorCount,
-                last_modified: new Date().toISOString()
-            };
-            
-            // Hide modal after showing success
-            setTimeout(() => {
-                this.hideModal('processing-modal');
-                this.showToast(`${sectionId} knowledge base built and saved successfully!`, 'success');
-            }, 2000);
-            
-        } catch (error) {
-            this.debug.error(`UI: Build/Save failed for ${sectionId}:`, error);
-            this.updateStatus(sectionId, 'error', `Failed: ${error.message}`);
-            this.updateCardStatus(sectionId, 'error', `Failed: ${error.message}`);
-            this.hideModal('processing-modal');
-            this.showToast(`${sectionId} failed: ${error.message}`, 'error');
+            const kbStatus = this.$(`${kind}-kb-status`);
+            const vecCount = this.$(`${kind}-vector-count`);
+            const savePathItem = this.$(`${kind}-save-path-item`);
+            const savePath = this.$(`${kind}-save-path`);
+
+            if (kbStatus) kbStatus.textContent = "Built & Saved";
+            if (vecCount) vecCount.textContent = String(buildRes.vector_count ?? buildRes?.processing_summary?.vectors ?? 0);
+            if (savePath) savePath.textContent = saveDir;
+            if (savePathItem) savePathItem.style.display = "";
+
+            this.showToast(`Knowledge base (${kbType}) built successfully.`, "success");
+        } catch (e) {
+            this.showToast(e.message || String(e), "error");
+            this.debug.error("Build KB error", e);
         } finally {
-            this.processing[sectionId] = false;
-            this.updateBuildButton(sectionId, false);
+            const btn = this.$(kind === "general" ? "general-build-btn" : "company-build-btn");
+            if (btn) { btn.disabled = false; btn.textContent = "🏗️ Build & Save Knowledge Base"; }
         }
     }
-    
-    showProcessingModal(section, model) {
-        const modal = document.getElementById('processing-modal');
-        const title = document.getElementById('processing-title');
-        const status = document.getElementById('processing-status');
-        const icon = document.getElementById('processing-icon');
-        const progress = document.getElementById('progress-fill');
-        const details = document.getElementById('processing-details');
-        
-        if (title) title.textContent = `Processing ${section.charAt(0).toUpperCase() + section.slice(1)} Documents`;
-        if (status) status.textContent = 'Preparing to build knowledge base...';
-        if (icon) icon.textContent = '🏗️';
-        if (progress) progress.style.width = '10%';
-        if (details) details.textContent = `Model: ${model} | Documents: ${this.files[section].length}`;
-        
-        this.showModal('processing-modal');
-    }
-    
-    updateProcessingModal(statusText, iconText, progressPercent) {
-        const status = document.getElementById('processing-status');
-        const icon = document.getElementById('processing-icon');
-        const progress = document.getElementById('progress-fill');
-        
-        if (status) status.textContent = statusText;
-        if (icon) icon.textContent = iconText;
-        if (progress) progress.style.width = `${progressPercent}%`;
-    }
-    
-    async callBuildAPI(files, kbType) {
-        try {
-            const result = await DocumentAPI.buildKnowledgeBase(files, kbType);
-            return result;
-        } catch (error) {
-            this.debug.error('UI: Build API call failed', error);
-            throw error;
-        }
-    }
-    
-    async callSaveAPI(kbType, savePath) {
-        try {
-            const result = await DocumentAPI.saveVectorstore(kbType, savePath);
-            return result;
-        } catch (error) {
-            this.debug.error('UI: Save API call failed', error);
-            throw error;
-        }
-    }
-    
-    updateStatus(sectionId, statusType, message) {
-        const buildStatus = document.getElementById(`${sectionId}-build-status`);
-        const saveStatus = document.getElementById(`${sectionId}-save-status`);
-        
-        if (statusType === 'building') {
-            if (buildStatus) {
-                buildStatus.textContent = message;
-                buildStatus.className = 'status-value building';
-            }
-            if (saveStatus) {
-                saveStatus.textContent = 'Waiting...';
-                saveStatus.className = 'status-value';
-            }
-        } else if (statusType === 'built') {
-            if (buildStatus) {
-                buildStatus.textContent = message;
-                buildStatus.className = 'status-value built';
-            }
-        } else if (statusType === 'saving') {
-            if (saveStatus) {
-                saveStatus.textContent = message;
-                saveStatus.className = 'status-value saving';
-            }
-        } else if (statusType === 'completed') {
-            if (buildStatus) {
-                buildStatus.textContent = 'Build completed';
-                buildStatus.className = 'status-value completed';
-            }
-            if (saveStatus) {
-                saveStatus.textContent = 'Saved successfully';
-                saveStatus.className = 'status-value completed';
-            }
-        } else if (statusType === 'error') {
-            if (buildStatus) {
-                buildStatus.textContent = message;
-                buildStatus.className = 'status-value error';
-            }
-            if (saveStatus) {
-                saveStatus.textContent = 'Save failed';
-                saveStatus.className = 'status-value error';
-            }
-        } else if (statusType === 'saved') {
-            if (saveStatus) {
-                saveStatus.textContent = message;
-                saveStatus.className = 'status-value saved';
-            }
-        }
-    }
-    
-    updateBuildButton(sectionId, isProcessing) {
-        const btn = document.getElementById(`${sectionId}-build-btn`);
-        if (!btn) return;
-        
-        if (isProcessing) {
-            btn.disabled = true;
-            btn.classList.add('loading');
-            btn.textContent = 'Processing...';
-        } else {
-            btn.classList.remove('loading');
-            btn.innerHTML = '🏗️ Build & Save Knowledge Base';
-            this.updateAllStatuses();
-        }
-    }
-    
-    showSavedPath(sectionId, path, vectorCount) {
-        const savedPathEl = document.getElementById(`${sectionId}-saved-path`);
-        const savedPathItem = document.getElementById(`${sectionId}-saved-path-item`);
-        
-        if (savedPathEl && savedPathItem) {
-            savedPathEl.textContent = path || `saved_${sectionId}_vectorstore`;
-            savedPathItem.style.display = 'flex';
-        }
-    }
-    
-    updateAllStatuses() {
-        const sections = ['general', 'company'];
-        
-        sections.forEach(section => {
-            const btn = document.getElementById(`${section}-build-btn`);
-            const hint = document.getElementById(`${section}-build-hint`);
-            
-            if (!btn || !hint) return;
-            
-            const hasFiles = this.files[section].length > 0;
-            const hasModel = this.selectedModel !== null;
-            const isProcessing = this.processing[section];
-            const hasExistingVectorstore = this.existingVectorstores[section]?.exists;
-            
-            let shouldDisable = true;
-            let hintText = '';
-            
-            if (!hasModel) {
-                shouldDisable = true;
-                if (hasExistingVectorstore) {
-                    hintText = 'Select a model to rebuild or use existing vectorstore';
-                } else {
-                    hintText = 'Select a model above to enable building';
-                    this.updateCardStatus(section, 'info', 'Select model to enable building');
-                }
-            } else if (!hasFiles && !hasExistingVectorstore) {
-                shouldDisable = true;
-                hintText = 'Upload documents to enable building';
-                this.updateCardStatus(section, 'warning', 'Upload files to build');
-            } else if (isProcessing) {
-                shouldDisable = true;
-                hintText = 'Processing...';
-            } else if (hasExistingVectorstore && !hasFiles) {
-                shouldDisable = true;
-                hintText = 'Upload new documents to rebuild';
-            } else {
-                shouldDisable = false;
-                const action = hasExistingVectorstore ? 'rebuild' : 'build';
-                hintText = `Ready to ${action} with ${this.selectedModel}`;
-                this.updateCardStatus(section, 'info', `Ready to ${action}`);
-            }
-            
-            btn.disabled = shouldDisable;
-            hint.textContent = hintText;
-        });
-        
-        this.updateDocumentCounts();
-        
-        // Update assessment status
-        this.updateAssessmentStatus();
-    }
-    
-    setupDragAndDrop(areaId, section) {
-        const area = document.getElementById(areaId);
-        if (!area) return;
-        
-        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-            area.addEventListener(eventName, (e) => {
-                e.preventDefault();
-                e.stopPropagation();
+
+    // ---------- Assessment ----------
+    setupAssessmentUI() {
+        // Dropzone
+        const area = this.$("assessment-upload-area");
+        if (area) {
+            const fileInput = document.createElement("input");
+            fileInput.type = "file"; fileInput.multiple = true;
+            fileInput.accept = ".pdf,.txt,.doc,.docx,.md,.csv,.xlsx";
+            fileInput.style.display = "none";
+            document.body.appendChild(fileInput);
+
+            const browseBtn = area.querySelector(".upload-link");
+            if (browseBtn) browseBtn.addEventListener("click", (e) => {
+                e.preventDefault(); fileInput.click();
             });
-        });
-        
-        area.addEventListener('dragover', () => {
-            area.classList.add('drag-over');
-        });
-        
-        area.addEventListener('dragleave', (e) => {
-            if (!area.contains(e.relatedTarget)) {
-                area.classList.remove('drag-over');
-            }
-        });
-        
-        area.addEventListener('drop', (e) => {
-            area.classList.remove('drag-over');
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                this.handleFileSelection(files, section);
-            }
-        });
-        
-        area.addEventListener('click', (e) => {
-            if (e.target.classList.contains('upload-link') || e.target.closest('.upload-link')) {
-                return;
-            }
-            const fileInput = document.getElementById(`${section}-file-input`);
-            if (fileInput) {
-                fileInput.click();
-            }
-        });
-    }
-    
-    setupBrowseButtons() {
-        // General Documents browse button
-        const generalUploadArea = document.getElementById('general-upload-area');
-        const generalFileInput = document.getElementById('general-file-input');
-        
-        if (generalUploadArea && generalFileInput) {
-            const generalBrowseBtn = generalUploadArea.querySelector('.upload-link');
-            if (generalBrowseBtn) {
-                generalBrowseBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this.debug.log('UI: General browse button clicked');
-                    generalFileInput.click();
-                });
-            }
+
+            area.addEventListener("dragover", (e) => { e.preventDefault(); area.classList.add("dragging"); });
+            area.addEventListener("dragleave", () => area.classList.remove("dragging"));
+            area.addEventListener("drop", (e) => {
+                e.preventDefault(); area.classList.remove("dragging");
+                const files = Array.from(e.dataTransfer.files || []);
+                this._addAssessmentFiles(files);
+            });
+
+            fileInput.addEventListener("change", (e) => {
+                const files = Array.from(e.target.files || []);
+                this._addAssessmentFiles(files);
+                fileInput.value = "";
+            });
         }
 
-        // Company Documents browse button  
-        const companyUploadArea = document.getElementById('company-upload-area');
-        const companyFileInput = document.getElementById('company-file-input');
-        
-        if (companyUploadArea && companyFileInput) {
-            const companyBrowseBtn = companyUploadArea.querySelector('.upload-link');
-            if (companyBrowseBtn) {
-                companyBrowseBtn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    this.debug.log('UI: Company browse button clicked');
-                    companyFileInput.click();
-                });
-            }
-        }
-    }
-    
-    handleFileSelection(files, section) {
-        const validFiles = this.validateFiles(files, section);
-        
-        validFiles.forEach(file => {
-            this.addDocument(file, section);
+        // Clear files
+        const clearBtn = this.$("assessment-remove-file");
+        if (clearBtn) clearBtn.addEventListener("click", () => {
+            this.assessmentFiles = [];
+            this._renderAssessmentFiles();
+            this.syncAssessmentButtons();
         });
-        
-        this.updateAllStatuses();
-        this.renderDocuments();
-        
-        if (validFiles.length > 0) {
-            this.showToast(`Successfully added ${validFiles.length} file${validFiles.length > 1 ? 's' : ''} to ${section} documents`, 'success');
-            this.debug.log(`UI: Added ${validFiles.length} files to ${section}`, validFiles.map(f => f.name));
-        }
+
+        // Run
+        const runBtn = this.$("run-assessment-btn");
+        if (runBtn) runBtn.addEventListener("click", () => this.handleAssessment());
     }
-    
-    validateFiles(files, section) {
-        const validFiles = [];
-        const maxFiles = section === 'general' ? 20 : 50;
-        const currentCount = this.files[section].length;
-        
-        for (const file of files) {
-            if (currentCount + validFiles.length >= maxFiles) {
-                this.showToast(`Maximum ${maxFiles} files allowed for ${section} documents`, 'error');
-                break;
-            }
-            
-            if (file.size > this.maxFileSize) {
-                this.showToast(`File "${file.name}" is too large. Maximum size is 10MB.`, 'error');
-                continue;
-            }
-            
-            if (!this.allowedTypes.includes(file.type) && !this.isValidFileExtension(file.name, section)) {
-                this.showToast(`File "${file.name}" has an unsupported format.`, 'error');
-                continue;
-            }
-            
-            if (this.files[section].some(doc => doc.name === file.name)) {
-                this.showToast(`File "${file.name}" already exists.`, 'error');
-                continue;
-            }
-            
-            validFiles.push(file);
-        }
-        
-        return validFiles;
+
+    _addAssessmentFiles(files) {
+        if (!files?.length) return;
+        this.assessmentFiles.push(...files);
+        this._renderAssessmentFiles();
+        this.syncAssessmentButtons();
     }
-    
-    isValidFileExtension(filename, section) {
-        const generalExtensions = ['.pdf', '.txt', '.docx', '.md'];
-        const companyExtensions = ['.pdf', '.txt', '.docx', '.md', '.xlsx'];
-        const allowedExtensions = section === 'general' ? generalExtensions : companyExtensions;
-        
-        const extension = filename.toLowerCase().substring(filename.lastIndexOf('.'));
-        return allowedExtensions.includes(extension);
-    }
-    
-    addDocument(file, section) {
-        const document = {
-            id: this.generateId(),
-            name: file.name,
-            size: file.size,
-            type: file.type,
-            section: section,
-            uploadedAt: new Date().toISOString(),
-            file: file
-        };
-        
-        this.files[section].push(document);
-    }
-    
-    updateDocumentCounts() {
-        const generalCount = this.files.general.length;
-        const companyCount = this.files.company.length;
-        
-        const generalCountEl = document.getElementById('general-count');
-        const companyCountEl = document.getElementById('company-count');
-        
-        if (generalCountEl) {
-            generalCountEl.textContent = `${generalCount} document${generalCount !== 1 ? 's' : ''}`;
-        }
-        if (companyCountEl) {
-            companyCountEl.textContent = `${companyCount} document${companyCount !== 1 ? 's' : ''}`;
-        }
-    }
-    
-    renderDocuments() {
-        this.renderDocumentSection('general');
-        this.renderDocumentSection('company');
-    }
-    
-    renderDocumentSection(section) {
-        const container = document.getElementById(`${section}-documents`);
-        if (!container) return;
-        
-        const documents = this.files[section];
-        
-        if (documents.length === 0) {
-            container.innerHTML = '<p class="no-docs">No documents uploaded yet</p>';
+
+    _renderAssessmentFiles() {
+        const wrap = this.$("assessment-file-display");
+        const list = this.$("assessment-files-list");
+        const count = this.$("assessment-count");
+        if (!wrap || !list || !count) return;
+
+        list.classList.add("document-list");
+        list.innerHTML = "";
+
+        if (!this.assessmentFiles.length) {
+            wrap.style.display = "none";
+            count.textContent = "No documents selected";
             return;
         }
-        
-        container.innerHTML = documents.map(doc => {
-            const fileIcon = this.getFileIcon(doc.name);
-            const fileSize = this.formatFileSize(doc.size);
-            const uploadDate = new Date(doc.uploadedAt).toLocaleDateString();
-            
-            return `
-                <div class="document-item fade-in">
-                    <div class="document-info">
-                        <div class="document-icon">${fileIcon}</div>
-                        <div class="document-details">
-                            <h4>${doc.name}</h4>
-                            <p>${fileSize} • Uploaded ${uploadDate}</p>
-                        </div>
-                    </div>
-                    <div class="document-actions">
-                        <button class="delete-btn" data-doc-id="${doc.id}" data-section="${section}" title="Delete document">
-                            🗑️
-                        </button>
-                    </div>
-                </div>
-            `;
-        }).join('');
-        
-        container.querySelectorAll('.delete-btn').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.preventDefault();
-                const docId = btn.dataset.docId;
-                const section = btn.dataset.section;
-                this.deleteDocument(docId, section);
-            });
+
+        wrap.style.display = "";
+        count.textContent = `${this.assessmentFiles.length} file(s) selected`;
+
+        this.assessmentFiles.forEach((f, idx) => {
+            const el = document.createElement("div");
+            el.className = "doc-item";
+            el.innerHTML = `
+      <div class="doc-left">
+        <div class="doc-icon">${this._fileEmoji(f.name)}</div>
+        <div class="doc-meta">
+          <div class="doc-name" title="${this._escape(f.name)}">${this._escape(f.name)}</div>
+          <div class="doc-sub">${this._ext(f.name) || "FILE"} · ${this._prettyBytes(f.size)}</div>
+        </div>
+      </div>
+      <div class="doc-right">#${idx + 1}</div>
+    `;
+            list.appendChild(el);
         });
     }
-    
-    deleteDocument(documentId, section) {
-        const document = this.files[section].find(doc => doc.id === documentId);
-        if (!document) return;
-        
-        this.currentDeletion = { id: documentId, section: section, name: document.name };
-        this.showModal('delete-modal');
+
+
+    syncAssessmentButtons() {
+        const runBtn = this.$("run-assessment-btn");
+        const ok = this.validateSessionModel() && this.assessmentFiles.length > 0;
+        if (runBtn) runBtn.disabled = !ok;
     }
-    
-    confirmDelete() {
-        if (!this.currentDeletion) return;
-        
-        const { id, section } = this.currentDeletion;
-        this.files[section] = this.files[section].filter(doc => doc.id !== id);
-        
-        this.updateAllStatuses();
-        this.renderDocuments();
-        this.hideModal('delete-modal');
-        
-        this.showToast(`Document "${this.currentDeletion.name}" has been deleted.`, 'success');
-        this.debug.log(`UI: Deleted document: ${this.currentDeletion.name} from ${section}`);
-        this.currentDeletion = null;
-    }
-    
-    switchTab(tabId) {
-        document.querySelectorAll('.nav-link').forEach(link => {
-            link.classList.remove('active');
-        });
-        
-        const activeLink = document.querySelector(`[data-tab="${tabId}"]`);
-        if (activeLink) {
-            activeLink.classList.add('active');
-        }
-        
-        document.querySelectorAll('.tab-content').forEach(content => {
-            content.classList.remove('active');
-        });
-        
-        const activeContent = document.getElementById(tabId);
-        if (activeContent) {
-            activeContent.classList.add('active');
-        }
-        
-        this.debug.log(`UI: Switched to tab: ${tabId}`);
-    }
-    
-    showModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.remove('hidden');
-            modal.classList.add('show');
-        }
-    }
-    
-    hideModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.remove('show');
-            setTimeout(() => {
-                modal.classList.add('hidden');
-            }, 300);
-        }
-    }
-    
-    showToast(message, type = 'info', duration = 5000) {
-        const toastContainer = this.getToastContainer();
-        
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        toast.innerHTML = `
-            <div class="toast-content">
-                <span class="toast-icon">${this.getToastIcon(type)}</span>
-                <div class="toast-body">
-                    <div class="toast-message">${message}</div>
-                    <div class="toast-time">${new Date().toLocaleTimeString()}</div>
-                </div>
-                <button class="toast-close">&times;</button>
-            </div>
-        `;
-        
-        toastContainer.appendChild(toast);
-        
-        // Animate in
-        requestAnimationFrame(() => {
-            toast.classList.add('show');
-        });
-        
-        // Auto-remove
-        setTimeout(() => {
-            this.removeToast(toast);
-        }, duration);
-        
-        // Manual close
-        toast.querySelector('.toast-close').addEventListener('click', () => {
-            this.removeToast(toast);
-        });
-    }
-    
-    removeToast(toast) {
-        toast.classList.remove('show');
-        setTimeout(() => {
-            if (toast.parentNode) {
-                toast.parentNode.removeChild(toast);
+
+    async handleAssessment() {
+        const runBtn = this.$("run-assessment-btn");
+        const status = this.$("assessment-status");
+        try {
+            if (runBtn) { runBtn.disabled = true; runBtn.textContent = "Running…"; }
+            if (status) status.textContent = "⏳ Processing";
+            const selected = sessionStorage.getItem("selectedModel");
+            const res = await DocumentAPI.runAssessment(this.assessmentFiles, selected, 4);
+
+            if (status) status.textContent = "✅ Completed";
+            this.showToast("Assessment completed.", "success");
+
+            // attach a download button/link
+            const cardBody = runBtn?.closest(".card-body") || this.$("document-assessment");
+            if (res.workbook_path && cardBody) {
+                let dl = this.$("assessment-download-btn");
+                if (!dl) {
+                    dl = document.createElement("button");
+                    dl.id = "assessment-download-btn";
+                    dl.className = "btn btn--secondary btn--full-width";
+                    dl.textContent = "⬇️ Download Report";
+                    dl.addEventListener("click", () => DocumentAPI.downloadReport(res.workbook_path));
+                    cardBody.appendChild(dl);
+                } else {
+                    dl.onclick = () => DocumentAPI.downloadReport(res.workbook_path);
+                }
             }
-        }, 300);
-    }
-    
-    getToastContainer() {
-        let container = document.getElementById('toast-container');
-        if (!container) {
-            container = document.createElement('div');
-            container.id = 'toast-container';
-            container.className = 'toast-container';
-            document.body.appendChild(container);
+        } catch (e) {
+            if (status) status.textContent = "❌ Failed";
+            this.showToast(e.message || String(e), "error");
+            this.debug.error("Assessment error", e);
+        } finally {
+            if (runBtn) { runBtn.disabled = false; runBtn.textContent = "📊 Run Assessment"; }
         }
-        return container;
     }
-    
-    getToastIcon(type) {
-        const icons = {
-            success: '✅',
-            error: '❌',
-            warning: '⚠️',
-            info: 'ℹ️'
-        };
-        return icons[type] || icons.info;
+
+    // ---------- Chat ----------
+    setupChatUI() {
+        const form = this.$("chat-form");
+        const input = this.$("chat-input");
+        const clear = this.$("chat-clear");
+
+        if (form) form.addEventListener("submit", (e) => {
+            e.preventDefault();
+            this.sendChatMessage();
+        });
+        if (input) {
+            input.addEventListener("keydown", (e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    this.sendChatMessage();
+                }
+            });
+        }
+        if (clear) {
+            clear.addEventListener("click", () => {
+                this.chatHistory = [];
+                const msgs = this.$("chat-messages");
+                if (msgs) {
+                    msgs.innerHTML = `
+            <div class="chat-empty">
+              <div class="placeholder-icon">💬</div>
+              <h3>Start chatting with your documents</h3>
+              <p>Type a question below. The assistant will use your saved vectorstores if available.</p>
+            </div>`;
+                }
+            });
+        }
     }
-    
-    getFileIcon(filename) {
-        const extension = filename.toLowerCase().substring(filename.lastIndexOf('.'));
-        const iconMap = {
-            '.pdf': '📄',
-            '.txt': '📝',
-            '.docx': '📘',
-            '.md': '📋',
-            '.xlsx': '📊'
-        };
-        return iconMap[extension] || '📄';
+
+    addChatMessage(role, text) {
+        const wrap = this.$("chat-messages");
+        if (!wrap) return;
+        const empty = wrap.querySelector(".chat-empty");
+        if (empty) empty.remove();
+
+        const row = document.createElement("div");
+        row.className = `chat-msg ${role}`;
+        row.innerHTML = `
+      <div class="chat-avatar">${role === "user" ? "🧑" : "🤖"}</div>
+      <div class="chat-bubble">${this._escape(text)}</div>
+    `;
+        wrap.appendChild(row);
+        wrap.scrollTop = wrap.scrollHeight;
     }
-    
-    formatFileSize(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+
+    async sendChatMessage() {
+        const input = this.$("chat-input");
+        const btn = this.$("chat-send");
+        if (!input) return;
+        const text = input.value.trim();
+        if (!text) return;
+
+        if (!this.validateSessionModel()) {
+            this.showToast("Please select a model before chatting.", "warning");
+            return;
+        }
+
+        // UI state
+        input.disabled = true;
+        if (btn) { btn.disabled = true; this._toggleSendSpinner(true); }
+
+        // Show user's message
+        this.addChatMessage("user", text);
+        input.value = "";
+
+        try {
+            // Build a lightweight conversation context to send
+            const MAX_TURNS = 6;
+            const recent = this.chatHistory.slice(-MAX_TURNS * 2);
+            const context = recent.map(m => (m.role === "user" ? `User: ${m.text}` : `Assistant: ${m.text}`)).join("\n");
+            const composed = context ? `${context}\nUser: ${text}` : text;
+
+            const res = await DocumentAPI.chat(composed);
+            const reply = res.response || "No response.";
+            this.addChatMessage("assistant", reply);
+
+            // Persist local chat memory
+            this.chatHistory.push({ role: "user", text });
+            this.chatHistory.push({ role: "assistant", text: reply });
+        } catch (e) {
+            this.addChatMessage("assistant", `⚠️ ${e.message || String(e)}`);
+            this.debug.error("Chat error", e);
+        } finally {
+            if (btn) { btn.disabled = false; this._toggleSendSpinner(false); }
+            input.disabled = false;
+            input.focus();
+            this.syncChatModelChip(); // keep pill accurate
+        }
     }
-    
-    generateId() {
-        return Date.now().toString(36) + Math.random().toString(36).substr(2);
+
+    _toggleSendSpinner(isLoading) {
+        const spinner = document.querySelector(".send-spinner");
+        const label = document.querySelector(".send-label");
+        if (spinner) spinner.hidden = !isLoading;
+        if (label) label.hidden = !!isLoading;
+    }
+
+    _escape(s) {
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 }
 
-// Initialize the application
-let uiManager;
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', async () => {
-        uiManager = new UIManager();
-        await uiManager.init();
-        window.uiManager = uiManager; // For debugging
+// ============ Bootstrap ============
+window.uiManager = new UIManager();
+document.addEventListener("DOMContentLoaded", () => {
+    window.uiManager.init().catch(e => {
+        DebugConsole.getInstance().error("Init failed", e);
+        alert("App failed to initialize. Check console/logs.");
     });
-} else {
-    (async () => {
-        uiManager = new UIManager();
-        await uiManager.init();
-        window.uiManager = uiManager; // For debugging
-    })();
-}
-
-// Enhanced error handling for unhandled promise rejections
-window.addEventListener('unhandledrejection', (event) => {
-    const debug = DebugConsole.getInstance();
-    debug.error('Unhandled promise rejection:', event.reason);
-    console.error('Unhandled promise rejection:', event.reason);
-});
-
-// Enhanced error handling for general errors
-window.addEventListener('error', (event) => {
-    const debug = DebugConsole.getInstance();
-    debug.error('Global error:', event.error);
-    console.error('Global error:', event.error);
 });
