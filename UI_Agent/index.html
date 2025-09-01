@@ -11,12 +11,16 @@
 
 <body>
     <div class="app-container">
+        <!-- Top Header -->
+        <header class="topbar">
+            <div class="topbar-title">Risk Control AI</div>
+        </header>
         <!-- Sidebar -->
         <aside class="sidebar">
+            <!-- Hamburger shown only when collapsed; centered at top of sidebar -->
+            <button id="sidebar-toggle" class="sidebar-toggle" aria-label="Toggle sidebar" aria-expanded="true" title="Expand sidebar">☰</button>
             <div class="sidebar-header">
-                <h1 class="sidebar-title">Document Management</h1>
-                <p class="sidebar-description">Upload documents and build knowledge bases for AI-powered document
-                    retrieval</p>
+                <img src="kpmg.png" alt="KPMG" class="company-logo">
                 <div class="api-status" id="api-status">
                     <span class="status-indicator">🔴</span>
                     <span class="status-text">Connecting...</span>
@@ -36,11 +40,22 @@
                     <span class="nav-icon">💬</span>
                     <span class="nav-text">Chat</span>
                 </button>
-                <button class="nav-link" data-tab="settings">
-                    <span class="nav-icon">⚙️</span>
-                    <span class="nav-text">Settings</span>
-                </button>
             </nav>
+
+            <!-- Close (collapse) button shown only when expanded -->
+            <button id="sidebar-close" class="sidebar-close" aria-label="Collapse sidebar" title="Collapse sidebar">✕</button>
+
+            <!-- Sidebar Footer / Utilities -->
+            <div class="sidebar-footer">
+                <button id="sidebar-utility-btn" class="sidebar-utility-btn" aria-haspopup="true" aria-expanded="false" title="User menu">
+                    <img src="user.png" alt="User" class="utility-icon" />
+                </button>
+                <div id="sidebar-utility-menu" class="sidebar-utility-menu hidden" role="menu" aria-label="Quick actions">
+                    <button class="utility-item" id="util-login" role="menuitem">🔐 Login</button>
+                    <button class="utility-item" id="util-help" role="menuitem">❓ Help</button>
+                    <button class="utility-item" id="util-settings" role="menuitem">⚙️ Settings</button>
+                </div>
+            </div>
         </aside>
 
         <!-- Main Content -->
@@ -257,12 +272,19 @@
                                 </div>
 
                                 <!-- Assessment File Display -->
-                                <div id="assessment-file-display" class="assessment-file-display"
-                                    style="display: none;">
-                                    <div id="assessment-files-list"></div>
-                                    <button id="assessment-remove-file" class="btn btn--outline btn--sm">Clear All
-                                        Files</button>
+                                <!-- Assessment File Display -->
+                                <div id="assessment-file-display" class="assessment-file-display" style="display:none;">
+                                    <div id="assessment-files-list" class="document-list">
+                                        <p class="no-docs">No documents selected</p>
+                                    </div>
+                                    <div class="doc-list-actions">
+                                        <button id="assessment-remove-file" class="btn btn--outline btn--sm"
+                                            style="display:none;">
+                                            Clear All Files
+                                        </button>
+                                    </div>
                                 </div>
+
 
                                 <!-- Assessment Action -->
                                 <div class="build-section">
@@ -328,13 +350,22 @@
 
                 <div class="chat-root">
                     <div class="chat-header">
-                        <div class="chat-model-pill">
-                            <span>Model:</span>
-                            <strong id="chat-active-model">—</strong>
+                        <div class="chat-partner">
+                            <div class="chat-partner-avatar">🤖</div>
+                            <div class="chat-partner-meta">
+                                <div class="chat-partner-name">Assistant</div>
+                                <div class="chat-partner-status"><span class="status-dot online"></span> Available</div>
+                            </div>
                         </div>
-                        <div class="chat-actions">
-                            <button id="chat-clear" class="btn btn--outline btn--sm" title="Clear conversation">🧹
-                                Clear</button>
+                        <div class="chat-header-right">
+                            <div class="chat-model-pill">
+                                <span>Model:</span>
+                                <strong id="chat-active-model">—</strong>
+                            </div>
+                            <div class="chat-actions">
+                                <button id="chat-clear" class="btn btn--outline btn--sm" title="Clear conversation">🧹
+                                    Clear</button>
+                            </div>
                         </div>
                     </div>
 
@@ -348,31 +379,21 @@
                     </div>
 
                     <form id="chat-form" class="chat-input-row" autocomplete="off">
+                        <button type="button" class="chat-action chat-attach" title="Attach">📎</button>
                         <textarea id="chat-input" class="chat-input"
-                            placeholder="Ask anything about your docs… (Shift+Enter for new line)"></textarea>
-                        <button id="chat-send" class="btn btn--primary chat-send" type="submit" aria-label="Send">
-                            <span class="send-label">Send</span>
-                            <span class="send-spinner" hidden>Thinking…</span>
-                        </button>
+                            placeholder="Write a message… (Shift+Enter for new line)"></textarea>
+                        <div class="chat-send-group">
+                            <button type="button" class="chat-action chat-emoji" title="Emoji">😊</button>
+                            <button id="chat-send" class="btn btn--primary chat-send" type="submit" aria-label="Send">
+                                <span class="send-label">Send</span>
+                                <span class="send-spinner" hidden>Thinking…</span>
+                            </button>
+                        </div>
                     </form>
                 </div>
             </div>
 
 
-    </div>
-
-    <!-- Settings Tab -->
-    <div id="settings" class="tab-content">
-        <div class="content-header">
-            <h1>Settings & Configuration</h1>
-            <p class="content-description">Customize AI behavior and system preferences</p>
-        </div>
-
-        <div class="placeholder-content">
-            <div class="placeholder-icon">⚙️</div>
-            <h3>Settings Configuration</h3>
-            <p>Customize AI behavior, processing preferences, and system configuration.</p>
-        </div>
     </div>
     </main>
     </div>
@@ -398,26 +419,7 @@
         </div>
     </div>
 
-    <!-- Debug Console -->
-    <!-- Debug Console Toggle -->
-    <button class="debug-toggle" id="debug-toggle" title="Toggle Debug Console">
-        🐛 Debug
-    </button>
-
-    <!-- Debug Panel -->
-    <div class="debug-panel hidden" id="debug-panel">
-        <div class="debug-header">
-            <h3>Debug Console</h3>
-            <button class="debug-close" id="debug-close">&times;</button>
-        </div>
-        <div class="debug-content">
-            <div class="debug-controls">
-                <button class="btn btn--sm btn--secondary" id="debug-clear">Clear</button>
-                <button class="btn btn--sm btn--secondary" id="debug-download">Download</button>
-            </div>
-            <div class="debug-output" id="debug-output"></div>
-        </div>
-    </div>
+    <!-- Debug console removed -->
 
     <!-- Toast Container -->
     <div id="toast-container" class="toast-container"></div>

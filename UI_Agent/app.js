@@ -5,61 +5,7 @@
 // - Uses selected model from Model Configuration (sessionStorage.selectedModel)
 // - Robust null-safe DOM access to avoid "Cannot set properties of null"
 
-// ============ Debug Console ============
-
-class DebugConsole {
-    static instance = null;
-    static getInstance() {
-        if (!DebugConsole.instance) DebugConsole.instance = new DebugConsole();
-        return DebugConsole.instance;
-    }
-    constructor() {
-        this.logs = [];
-        this.maxLogs = 100;
-    }
-    log(message, data = null) {
-        const timestamp = new Date().toLocaleTimeString();
-        const entry = { timestamp, message, data, type: "log" };
-        console.log(`[${timestamp}] ${message}`, data ?? "");
-        this._append(entry);
-    }
-    error(message, error) {
-        const timestamp = new Date().toLocaleTimeString();
-        const entry = { timestamp, message, data: error?.stack || error?.message || error, type: "error" };
-        console.error(`[${timestamp}] ERROR: ${message}`, error);
-        this._append(entry);
-    }
-    _append(entry) {
-        const panel = document.getElementById("debug-output");
-        if (panel) {
-            const div = document.createElement("div");
-            div.className = `debug-entry ${entry.type}`;
-            div.innerHTML = `
-        <span class="debug-time">${entry.timestamp}</span>
-        <span class="debug-message">${entry.message}</span>
-        ${entry.data ? `<div class="debug-data">${typeof entry.data === "object" ? JSON.stringify(entry.data, null, 2) : String(entry.data)}</div>` : ""}
-      `;
-            panel.appendChild(div);
-            panel.scrollTop = panel.scrollHeight;
-            const keep = panel.querySelectorAll(".debug-entry");
-            if (keep.length > 50) keep[0].remove();
-        }
-        this.logs.push(entry);
-        if (this.logs.length > this.maxLogs) this.logs.shift();
-    }
-    clear() {
-        const panel = document.getElementById("debug-output");
-        if (panel) panel.innerHTML = "";
-        this.logs = [];
-    }
-    downloadLogs() {
-        const txt = this.logs.map(l => `[${l.timestamp}] ${l.type.toUpperCase()}: ${l.message}${l.data ? `\n${typeof l.data === "object" ? JSON.stringify(l.data, null, 2) : l.data}` : ""}`).join("\n\n");
-        const blob = new Blob([txt], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = Object.assign(document.createElement("a"), { href: url, download: `debug-log-${new Date().toISOString().slice(0, 19).replace(/:/g, "-")}.txt` });
-        document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    }
-}
+// Debug console removed
 
 // ============ API Layer ============
 
@@ -67,38 +13,28 @@ class DocumentAPI {
     static baseUrl = "http://localhost:8000";
 
     static async checkHealth() {
-        const debug = DebugConsole.getInstance();
         try {
             const r = await fetch(`${this.baseUrl}/health`);
-            debug.log(`API: /health -> ${r.status}`);
             return r.ok;
         } catch (e) {
-            debug.error("API: health failed", e);
             return false;
         }
     }
 
     static async getModels() {
-        const debug = DebugConsole.getInstance();
-        debug.log("API: fetching models…");
         try {
             const r = await fetch(`${this.baseUrl}/models`);
             if (!r.ok) throw new Error(`HTTP ${r.status}`);
             const data = await r.json();
             const models = Array.isArray(data) ? data : (data.models || data.data || []);
-            debug.log("API: models", models);
             return models;
         } catch (e) {
-            debug.error("API: getModels failed, using mock", e);
             return ["llama2", "mistral", "qwen2", "phi", "codellama"];
         }
     }
 
     // NEW: check & load saved vectorstores (global/company) into server cache.
     static async checkExistingVectorstores(preferredModel = null) {
-        const debug = DebugConsole.getInstance();
-        debug.log("API: Checking for existing vectorstores…");
-
         const result = {
             general: { exists: false, path: null, vector_count: 0, last_modified: null },
             company: { exists: false, path: null, vector_count: 0, last_modified: null }
@@ -124,7 +60,6 @@ class DocumentAPI {
                     form.append("model_name", modelName);
 
                     const resp = await fetch(`${this.baseUrl}/load-vectorstore`, { method: "POST", body: form });
-                    debug.log(`API: /load-vectorstore (${check.kb_type}) -> ${resp.status}`);
 
                     if (resp.ok) {
                         const data = await resp.json();
@@ -135,29 +70,24 @@ class DocumentAPI {
                                 vector_count: data.ntotal ?? data.vector_count ?? 0,
                                 last_modified: new Date().toISOString()
                             };
-                            debug.log(`API: Loaded ${check.kb_type} KB with ${result[check.type].vector_count} vectors.`);
                         } else {
-                            debug.log(`API: ${check.kb_type} KB not loaded:`, data);
                         }
                     } else {
-                        const err = await resp.text();
-                        debug.log(`API: ${check.kb_type} KB load not OK: ${resp.status} ${err}`);
+                        await resp.text();
                     }
                 } catch (e) {
-                    debug.log(`API: Error checking ${check.kb_type} KB`, e?.message || e);
+                    // ignore
                 }
             }
 
             return result;
         } catch (e) {
-            debug.error("API: vectorstore check failed", e);
             // Return a conservative default (no mocks) to avoid confusing UI
             return result;
         }
     }
 
     static async buildKnowledgeBase(files, kbType, selectedModel, opts = {}) {
-        const debug = DebugConsole.getInstance();
         if (!selectedModel) throw new Error("No model selected");
         if (!files?.length) throw new Error("No files to build KB");
 
@@ -170,40 +100,32 @@ class DocumentAPI {
         form.append("max_retries", String(opts.max_retries ?? 3));
 
         const url = `${this.baseUrl}/build-knowledge-base`;
-        debug.log(`API: POST ${url} (${kbType}) with ${files.length} files`);
         const r = await fetch(url, { method: "POST", body: form });
         if (!r.ok) {
             const t = await r.text();
-            debug.error("API: build KB failed", t);
             throw new Error(`Build failed (${r.status}): ${t}`);
         }
         const data = await r.json();
-        debug.log("API: build KB resp", data);
         if (!data.success) throw new Error(data.error_details || data.message || "Build failed");
 
         return data;
     }
 
     static async saveVectorstore(kbType, dirPath) {
-        const debug = DebugConsole.getInstance();
         const form = new FormData();
         form.append("kb_type", kbType);
         form.append("dir_path", dirPath);
-        debug.log(`API: save vectorstore (${kbType}) -> ${dirPath}`);
         const r = await fetch(`${this.baseUrl}/save-vectorstore`, { method: "POST", body: form });
         if (!r.ok) {
             const t = await r.text();
-            debug.error("API: save vectorstore failed", t);
             throw new Error(`Save failed (${r.status}): ${t}`);
         }
         const data = await r.json();
-        debug.log("API: save vectorstore resp", data);
         if (!data.success) throw new Error(data.message || "Save failed");
         return data;
     }
 
     static async runAssessment(files, selectedModel, maxWorkers = 4) {
-        const debug = DebugConsole.getInstance();
         if (!selectedModel) throw new Error("No model selected");
         if (!files?.length) throw new Error("No files for assessment");
 
@@ -213,23 +135,18 @@ class DocumentAPI {
         for (const f of files) form.append("evidence_files", f);
 
         const url = `${this.baseUrl}/assess-evidence`;
-        debug.log(`API: POST ${url} with ${files.length} files`);
         const r = await fetch(url, { method: "POST", body: form });
         if (!r.ok) {
             const t = await r.text();
-            debug.error("API: assess failed", t);
             throw new Error(`Assessment failed (${r.status}): ${t}`);
         }
         const data = await r.json();
-        debug.log("API: assessment resp", data);
         if (!data.success) throw new Error(data.error_details || data.message || "Assessment failed");
         return data;
     }
 
     static async downloadReport(filename) {
-        const debug = DebugConsole.getInstance();
         const url = `${this.baseUrl}/download-report?filename=${encodeURIComponent(filename)}`;
-        debug.log(`API: download report ${filename}`);
         const r = await fetch(url);
         if (!r.ok) throw new Error(`Download failed (${r.status})`);
         const blob = await r.blob();
@@ -241,7 +158,6 @@ class DocumentAPI {
     }
 
     static async chat(userInput) {
-        const debug = DebugConsole.getInstance();
         const selectedModel = sessionStorage.getItem("selectedModel");
         if (!selectedModel) throw new Error("Please select a model before chatting.");
 
@@ -257,11 +173,9 @@ class DocumentAPI {
         });
         if (!r.ok) {
             const t = await r.text();
-            debug.error("API: chat failed", t);
             throw new Error(`Chat failed (${r.status}): ${t}`);
         }
         const data = await r.json();
-        debug.log("API: chat resp", data);
         if (!data.success) throw new Error(data.error || "Chat failed");
         return data;
     }
@@ -271,7 +185,6 @@ class DocumentAPI {
 
 class UIManager {
     constructor() {
-        this.debug = DebugConsole.getInstance();
         this.availableModels = [];
         this.modelLocked = false;
 
@@ -286,6 +199,8 @@ class UIManager {
     // ---------- Init ----------
     async init() {
         this.setupNav();
+        this.setupSidebarToggle();
+        this.setupUtilityMenu();
         this.setupModelUI();
         this.setupUploads();
         this.setupAssessmentUI();
@@ -312,12 +227,62 @@ class UIManager {
         return parts.length > 1 ? parts.pop().toUpperCase() : "";
     }
 
+    // ---------- Sidebar Utility Menu (Login/Help/Settings) ----------
+    setupUtilityMenu() {
+        const btn = document.getElementById('sidebar-utility-btn');
+        const menu = document.getElementById('sidebar-utility-menu');
+        if (!btn || !menu) return;
+
+        const closeMenu = () => {
+            if (menu.classList.contains('hidden')) return;
+            menu.classList.add('hidden');
+            btn.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('click', onDocClick, true);
+            document.removeEventListener('keydown', onKey);
+        };
+
+        const onDocClick = (e) => {
+            if (!menu.contains(e.target) && e.target !== btn) {
+                closeMenu();
+            }
+        };
+
+        const onKey = (e) => {
+            if (e.key === 'Escape') closeMenu();
+        };
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isHidden = menu.classList.contains('hidden');
+            if (isHidden) {
+                menu.classList.remove('hidden');
+                btn.setAttribute('aria-expanded', 'true');
+                // attach listeners for outside click / esc
+                setTimeout(() => {
+                    document.addEventListener('click', onDocClick, true);
+                    document.addEventListener('keydown', onKey);
+                }, 0);
+            } else {
+                closeMenu();
+            }
+        });
+
+        // Placeholder actions
+        const login = document.getElementById('util-login');
+        const help = document.getElementById('util-help');
+        const settings = document.getElementById('util-settings');
+        const toast = (msg) => { try { this.showToast(msg, 'info'); } catch { alert(msg); } };
+        if (login) login.addEventListener('click', () => { closeMenu(); toast('Login coming soon'); });
+        if (help) help.addEventListener('click', () => { closeMenu(); toast('Help coming soon'); });
+        if (settings) settings.addEventListener('click', () => { closeMenu(); toast('Settings coming soon'); });
+    }
+
     _fileEmoji(name) {
         const ext = this._ext(name).toLowerCase();
         switch (ext) {
             case "pdf": return "📄";
             case "txt": return "📝";
-            case "doc":
+            case "doc": return "📄";
             case "docx": return "📃";
             case "csv": return "🧾";
             case "xlsx": return "📊";
@@ -356,6 +321,42 @@ class UIManager {
                 // When switching to Chat, ensure pill updates
                 if (tab === "document-chat") this.syncChatModelChip();
             });
+        });
+    }
+
+    // ---------- Sidebar Toggle ----------
+    setupSidebarToggle() {
+        const container = document.querySelector('.app-container');
+        const toggleBtn = document.getElementById('sidebar-toggle'); // hamburger (collapsed)
+        const closeBtn = document.getElementById('sidebar-close');   // cross (expanded)
+        if (!container || !toggleBtn || !closeBtn) return;
+
+        const applyState = (collapsed) => {
+            container.classList.toggle('sidebar-collapsed', collapsed);
+            toggleBtn.setAttribute('aria-expanded', String(!collapsed));
+            toggleBtn.title = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
+            toggleBtn.textContent = '☰';
+            closeBtn.title = 'Collapse sidebar';
+            closeBtn.setAttribute('aria-label', 'Collapse sidebar');
+        };
+
+        // Restore saved state
+        const saved = localStorage.getItem('sidebarCollapsed');
+        applyState(saved === 'true');
+
+        // Hamburger expands when collapsed; otherwise toggles
+        toggleBtn.addEventListener('click', () => {
+            const isCollapsed = container.classList.contains('sidebar-collapsed');
+            const collapsed = !isCollapsed ? true : false; // toggle
+            // If currently collapsed, expand; else collapse
+            applyState(!isCollapsed);
+            localStorage.setItem('sidebarCollapsed', String(!isCollapsed));
+        });
+
+        // Close always collapses
+        closeBtn.addEventListener('click', () => {
+            applyState(true);
+            localStorage.setItem('sidebarCollapsed', 'true');
         });
     }
 
@@ -479,7 +480,7 @@ class UIManager {
                 this.showToast("No saved knowledge bases found.", "info");
             }
         } catch (e) {
-            this.debug.error("Detect/load vectorstores failed", e);
+            console.error("Detect/load vectorstores failed", e);
         }
     }
 
@@ -721,6 +722,7 @@ class UIManager {
         const wrap = this.$("assessment-file-display");
         const list = this.$("assessment-files-list");
         const count = this.$("assessment-count");
+        const clear = this.$("assessment-remove-file");
         if (!wrap || !list || !count) return;
 
         list.classList.add("document-list");
@@ -729,11 +731,13 @@ class UIManager {
         if (!this.assessmentFiles.length) {
             wrap.style.display = "none";
             count.textContent = "No documents selected";
+            if (clear) clear.style.display = "none";
             return;
         }
 
         wrap.style.display = "";
         count.textContent = `${this.assessmentFiles.length} file(s) selected`;
+        if (clear) clear.style.display = "";  // show the Clear All button
 
         this.assessmentFiles.forEach((f, idx) => {
             const el = document.createElement("div");
@@ -789,7 +793,7 @@ class UIManager {
         } catch (e) {
             if (status) status.textContent = "❌ Failed";
             this.showToast(e.message || String(e), "error");
-            this.debug.error("Assessment error", e);
+            console.error("Assessment error", e);
         } finally {
             if (runBtn) { runBtn.disabled = false; runBtn.textContent = "📊 Run Assessment"; }
         }
@@ -837,9 +841,13 @@ class UIManager {
 
         const row = document.createElement("div");
         row.className = `chat-msg ${role}`;
+        const ts = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
         row.innerHTML = `
       <div class="chat-avatar">${role === "user" ? "🧑" : "🤖"}</div>
-      <div class="chat-bubble">${this._escape(text)}</div>
+      <div>
+        <div class="chat-bubble">${this._escape(text)}</div>
+        <div class="chat-meta">${ts}</div>
+      </div>
     `;
         wrap.appendChild(row);
         wrap.scrollTop = wrap.scrollHeight;
@@ -881,7 +889,7 @@ class UIManager {
             this.chatHistory.push({ role: "assistant", text: reply });
         } catch (e) {
             this.addChatMessage("assistant", `⚠️ ${e.message || String(e)}`);
-            this.debug.error("Chat error", e);
+            console.error("Chat error", e);
         } finally {
             if (btn) { btn.disabled = false; this._toggleSendSpinner(false); }
             input.disabled = false;
@@ -906,7 +914,7 @@ class UIManager {
 window.uiManager = new UIManager();
 document.addEventListener("DOMContentLoaded", () => {
     window.uiManager.init().catch(e => {
-        DebugConsole.getInstance().error("Init failed", e);
+        console.error("Init failed", e);
         alert("App failed to initialize. Check console/logs.");
     });
 });

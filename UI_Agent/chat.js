@@ -1,10 +1,5 @@
 /* Lightweight chat integration (no changes to existing app.js) */
 (function () {
-  const debug = (function () {
-    try {
-      return window.DebugConsole ? window.DebugConsole.getInstance() : { log(){}, error(){} };
-    } catch { return { log(){}, error(){} }; }
-  })();
 
   function $(id) { return document.getElementById(id); }
 
@@ -72,8 +67,6 @@
     setSending(true);
 
     try {
-      debug.log("Chat: sending", { model, textLength: text.length });
-
       const res = await fetch("http://localhost:8000/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -90,7 +83,6 @@
       }
 
       const data = await res.json();
-      debug.log("Chat: response", data);
 
       if (data && data.success && data.response) {
         appendMessage("assistant", data.response);
@@ -99,7 +91,6 @@
         appendMessage("assistant", msg);
       }
     } catch (err) {
-      debug.error("Chat: failed", err);
       appendMessage("assistant", `⚠️ ${err.message || err}`);
     } finally {
       setSending(false);
