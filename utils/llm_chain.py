@@ -24,8 +24,9 @@ warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 # Get Ollama base URL from environment variable
 OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-embeddings = OllamaEmbeddings(model="bge-m3:latest",base_url=OLLAMA_BASE_URL)  # Ensure faiss-gpu is installed for GPU usage
-llm = OllamaLLM(model="bge-m3:latest", base_url=OLLAMA_BASE_URL, temperature = 0)
+
+# embeddings = OllamaEmbeddings(model="bge-m3:latest",base_url=OLLAMA_BASE_URL)  # Ensure faiss-gpu is installed for GPU usage
+# llm = OllamaLLM(model="bge-m3:latest", base_url=OLLAMA_BASE_URL, temperature = 0)
 
 # Setup Logging
 logging.basicConfig(
@@ -39,9 +40,10 @@ def initialize(selected_model):
     """
     Initializes the embeddings and llm objects with the selected_model.
     This function should be called from app.py with the desired model name.
-    """
-    
+    """  
     global llm
+    global embeddings
+    embeddings = OllamaEmbeddings(model=selected_model,base_url=OLLAMA_BASE_URL)
     llm = OllamaLLM(model=selected_model, base_url=OLLAMA_BASE_URL)
     
 # LangChain components
@@ -126,9 +128,9 @@ def build_knowledge_base(files, selected_model, batch_size=15, delay_between_bat
                 raise Exception(f"Failed to process batch {current_batch_num}")
             
             # Delay between batches (except for the last one)
-            if current_batch_num < total_batches:
-                logger.debug(f"Waiting {delay_between_batches}s before next batch...")
-                time.sleep(delay_between_batches)
+            # if current_batch_num < total_batches:
+            #     logger.debug(f"Waiting {delay_between_batches}s before next batch...")
+            #     time.sleep(delay_between_batches)
 
         logger.info(f"Vector store built successfully with {kb_vectorstore.index.ntotal} vectors.")
         
@@ -166,7 +168,8 @@ def extract_and_validate_json(text):
     except Exception as e:
         raise ValueError(f"Could not parse JSON after cleaning: {e}")
 
-def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, chunk_index=0, doc_index=0):
+def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, selected_model, chunk_index=0, doc_index=0):
+    initialize(selected_model)
     try:
         parser = PydanticOutputParser(pydantic_object=Assessment)        
 
@@ -329,10 +332,10 @@ def render_text_to_image(evidence_docs, font_size=14, width=1200, bg_color="whit
             y += line_height
         return img
 
-def assess_evidence_with_kb(evidence_docs, kb_vectorstore, company_kb_vectorstore, max_workers=4):
+def assess_evidence_with_kb(evidence_files, kb_vectorstore, company_kb_vectorstore, selected_model, max_workers=4):
     start = time.time()
     evid_texts, chunk_origin = [], []    
-
+    evidence_docs = save_and_load_files(evidence_files)
     for i, doc in enumerate(evidence_docs):
         try:
             if not doc.page_content.strip():
@@ -353,7 +356,7 @@ def assess_evidence_with_kb(evidence_docs, kb_vectorstore, company_kb_vectorstor
     results = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
-            executor.submit(_assess_single_evidence, evid_texts[i], kb_vectorstore, company_kb_vectorstore, i, chunk_origin[i])
+            executor.submit(_assess_single_evidence, evid_texts[i], kb_vectorstore, company_kb_vectorstore, selected_model, i, chunk_origin[i])
             for i in range(len(evid_texts))
         ]
         for future in as_completed(futures):
@@ -364,11 +367,12 @@ def assess_evidence_with_kb(evidence_docs, kb_vectorstore, company_kb_vectorstor
 
 #------------------ Generate Executive summary -----------------
 
-def generate_executive_summary(assessments):
+def generate_executive_summary(assessments, selected_model):
     all_text = "\n\n".join(
         json.dumps(a["assessment"], indent=2) if isinstance(a["assessment"], dict) else str(a["assessment"])
         for a in assessments if "assessment" in a
     )
+    initialize(selected_model)
     prompt = f"""
             You are a cybersecurity audit assistant. Given the following detailed control assessments, produce an Executive Summary section for an audit report. Your summary must include:
             - Overall risk assessment and control maturity rating

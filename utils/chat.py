@@ -1,6 +1,6 @@
 import streamlit as st
 from utils.find_llm import _ollama_models
-from langchain_ollama import OllamaLLM
+from langchain_ollama import OllamaEmbeddings, OllamaLLM
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
 import logging
@@ -100,70 +100,7 @@ def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vecto
             st.experimental_rerun()
 
     if send_clicked and user_input.strip() != "":
-        ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-        llm = OllamaLLM(model=selected_model, base_url=ollama_base_url)
-        
-        if kb_vectorstore is not None:
-            kb_contexts = kb_vectorstore.similarity_search(user_input, k=3)
-            kb_context = "\n\n".join([c.page_content for c in kb_contexts])
-        else:
-            kb_context = None
-
-        if company_kb_vectorstore is not None:
-            company_contexts = company_kb_vectorstore.similarity_search(user_input, k=3)
-            company_kb_context = "\n\n".join([c.page_content for c in company_contexts])
-        else:
-            company_kb_context = None
-
-        if evid_vectorstore is not  None:
-            evid_contexts = evid_vectorstore.similarity_search(user_input, k=3)
-            evid_context = "\n\n".join([c.page_content for c in evid_contexts])
-        else:
-            evid_context = None                
-       
-        
-
-        logger.info(f"Using model: {selected_model} for chat response")  
-
-        cybersecurity_bot_prompt = PromptTemplate(
-            input_variables=[
-                "user_input",
-                "kb_context",
-                "company_kb_context",
-                "evid_context"
-            ],
-            template="""
-                    You are a highly capable cybersecurity assistant. You have access to the following contextual sources:
-
-                    You have a base level understanding of cybersecurity risk and control policies from : {kb_context}
-
-                    You have an understanding of company-specific policies, procedures, and guidelines from : {company_kb_context}
-
-                    User may upload some files and you have access to the following evidence or uploaded files context : {evid_context}                   
-
-                    --- USER QUESTION OR TASK ---
-                    {user_input}
-
-                    Instructions:
-                    - Answer any question regarding cybersecurity, company policy, security audit, analysis of logs, compliance, or best practices, using the most relevant source above.                   
-                    - If asked to perform an analysis, provide a thorough, step-by-step evaluation.
-                    - If asked for a report or compliance summary, format your answer as a clear, well-structured analysis that can be directly used for generation.
-                    - Always reference the context you used in your answer.
-                    - If information is missing, clearly state the assumptions or request clarification.
-                    - For all other cases, including but not limited to recommendations, factual queries and more, you provide insightful and in-depth responses. Your goal is to leave the user feeling like no stone has been left unturned. Responses that are too short are lazy. DO NOT be lazy. Be thoughtful.
-
-                    Your output should be comprehensive, detailed, actionable, tabular (if doing comparisions).
-                    """
-        )
-
-        chain = LLMChain(llm=llm, prompt=cybersecurity_bot_prompt)
-      
-        response = response = chain.run({
-                "user_input": user_input,
-                "kb_context": kb_context,
-                "company_kb_context": company_kb_context,
-                "evid_context": evid_context
-            })
+        cybersecurity_bot_prompt, response = chat_with_ai(kb_vectorstore, company_kb_vectorstore, evid_vectorstore, selected_model, user_input)
         logger.info(f"Generated Prompt: {cybersecurity_bot_prompt}")
         logger.info(f"User input: {user_input}")
         st.session_state["chat_history"].append({"user": user_input, "bot": response})
@@ -176,3 +113,75 @@ def chat_with_bot(kb_vectorstore, company_kb_vectorstore, assessment, evid_vecto
     for chat in reversed(st.session_state["chat_history"]):
         user_chat_box(chat["user"])
         bot_chat_box(chat["bot"])
+
+def chat_with_ai(kb_vectorstore, company_kb_vectorstore, evid_vectorstore, selected_model, user_input,embedding_model = None):
+    ollama_base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    llm = OllamaLLM(model=selected_model, base_url=ollama_base_url)
+
+    # Default embedding model (must be SAME one used when building vectorstores!)
+    if embedding_model is None:
+        embedding_model = OllamaEmbeddings(model="gemma3:latest", base_url=ollama_base_url)
+
+    # Debug: check FAISS dimension consistency
+    def safe_similarity_search(store, query):
+        if store is None:
+            return []
+        try:
+            test_vec = embedding_model.embed_query("dimension check")
+            if len(test_vec) != store.index.d:
+                raise ValueError(
+                    f"Embedding dimension mismatch: model={len(test_vec)}, faiss={store.index.d}. "
+                    f"Rebuild the FAISS index with the correct embedding model."
+                )
+            return store.similarity_search(query, k=3)
+        except Exception as e:
+            logger.error(f"Error during similarity search: {e}")
+            return []
+
+    kb_contexts = safe_similarity_search(kb_vectorstore, user_input)
+    company_contexts = safe_similarity_search(company_kb_vectorstore, user_input)
+    evid_contexts = safe_similarity_search(evid_vectorstore, user_input)
+
+    kb_context = "\n\n".join([c.page_content for c in kb_contexts]) if kb_contexts else None
+    company_kb_context = "\n\n".join([c.page_content for c in company_contexts]) if company_contexts else None
+    evid_context = "\n\n".join([c.page_content for c in evid_contexts]) if evid_contexts else None
+
+    logger.info(f"Using model: {selected_model} for chat response")  
+
+    cybersecurity_bot_prompt = PromptTemplate(
+            input_variables=[
+                "user_input",
+                "kb_context",
+                "company_kb_context",
+                "evid_context"
+            ],
+            template="""
+                    You are a highly capable cybersecurity assistant. You have access to the following contextual sources:
+                    You have a base level understanding of cybersecurity risk and control policies from : {kb_context}
+                    You have an understanding of company-specific policies, procedures, and guidelines from : {company_kb_context}
+                    User may upload some files and you have access to the following evidence or uploaded files context : {evid_context}                   
+                    --- USER QUESTION OR TASK ---
+                    {user_input}
+                    Instructions:
+                    - Answer any question regarding cybersecurity, company policy, security audit, analysis of logs, compliance, or best practices, using the most relevant source above.                   
+                    - If asked to perform an analysis, provide a thorough, step-by-step evaluation.
+                    - If asked for a report or compliance summary, format your answer as a clear, well-structured analysis that can be directly used for generation.
+                    - Always reference the context you used in your answer.
+                    - If information is missing, clearly state the assumptions or request clarification.
+                    - For all other cases, including but not limited to recommendations, factual queries and more, you provide insightful and in-depth responses. Your goal is to leave the user feeling like no stone has been left unturned. Responses that are too short are lazy. DO NOT be lazy. Be thoughtful.
+                    - If asked about something you do not understand or is out of scope, just reply with "Sorry! I don't understand this"
+                    - For small talk, like 'Hi' or 'Hello' just reply with "Hi! How may I assist you today?".
+                    Your output should be comprehensive, detailed, actionable, tabular (if doing comparisions).
+                    """
+        )
+
+    chain = LLMChain(llm=llm, prompt=cybersecurity_bot_prompt)
+      
+    response = response = chain.run({
+                "user_input": user_input,
+                "kb_context": kb_context,
+                "company_kb_context": company_kb_context,
+                "evid_context": evid_context
+            })
+        
+    return cybersecurity_bot_prompt,response

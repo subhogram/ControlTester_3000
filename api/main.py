@@ -77,8 +77,8 @@ app.add_middleware(
 # Config & Helpers
 # ----------------------------------------------------------------------------
 class _Cfg:
-    MAX_FILE_SIZE = 500 * 1024 * 1024  # 50 MB
-    SUPPORTED_EXT = {".txt", ".pdf", ".doc", ".docx", ".md", ".csv"}
+    MAX_FILE_SIZE = 1024 * 1024 * 1024 
+    # SUPPORTED_EXT = {".txt", ".pdf", ".doc", ".docx", ".md", ".csv", ".xlsx"}
     MAX_FILES = None
     DEFAULT_BATCH = 15
     DEFAULT_DELAY = 0.2
@@ -160,9 +160,9 @@ def _validate_upload(file: UploadFile) -> List[str]:
     if not file.filename:
         errs.append("Missing filename")
         return errs
-    ext = Path(file.filename).suffix.lower()
-    if ext not in _Cfg.SUPPORTED_EXT:
-        errs.append(f"Unsupported file type '{ext}'")
+    # ext = Path(file.filename).suffix.lower()
+    # if ext not in _Cfg.SUPPORTED_EXT:
+    #     errs.append(f"Unsupported file type '{ext}'")
     if file.size and file.size > _Cfg.MAX_FILE_SIZE:
         size_mb = file.size / 1024 / 1024
         max_mb = _Cfg.MAX_FILE_SIZE / 1024 / 1024
@@ -362,6 +362,115 @@ async def build_kb(
 # ----------------------------------------------------------------------------
 # Evidence Assessment Endpoint
 # ----------------------------------------------------------------------------
+# @app.post(
+#     "/assess-evidence",
+#     response_model=AssessmentResponse,
+#     tags=["assessment"],
+#     summary="Assess evidence files against knowledge bases"
+# )
+# async def assess_evidence(
+#     selected_model: str = Form(...),
+#     max_workers: int = Form(4),
+#     evidence_files: List[UploadFile] = File(...)    
+# ):   
+#     t0 = time.time()
+
+#     try:
+#         AssessmentRequest(selected_model=selected_model, max_workers=max_workers)
+#     except Exception as e:
+#         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+#     if not evidence_files:
+#         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Evidence files are required")  
+    
+#     evidence_objs: List[Any] = []
+#     tmp_paths: List[str] = []       
+#     file_results: List[FileResult] = []
+#     base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+#     embeddings_for_load = OllamaEmbeddings(model=selected_model, base_url=base_url)
+
+#     try:  
+#         for uf in evidence_files:
+#             start = time.time()
+#             ext = Path(uf.filename).suffix or ".tmp"
+#             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+#             tmp.write(await uf.read())
+#             tmp.close()
+#             tmp_paths.append(tmp.name)
+#             fh = open(tmp.name, "rb")
+#             evidence_objs.append(fh)
+#             file_results.append(FileResult(
+#                 filename=uf.filename,
+#                 size_bytes=uf.size or 0,
+#                 status="saved",
+#                 processing_time=time.time() - start
+#             ))
+       
+#         global_vectorstore = load_faiss_vectorstore("saved_global_vectorstore", embeddings_for_load)
+#         if not global_vectorstore:
+#             raise HTTPException(status.HTTP_400_BAD_REQUEST, "global vectorstores are required")
+#         VECTORSTORE_CACHE["global"] = global_vectorstore        
+        
+#         company_vectorstore = load_faiss_vectorstore("saved_company_vectorstore", embeddings_for_load)
+#         if not company_vectorstore:
+#             raise HTTPException(status.HTTP_400_BAD_REQUEST, "company vectorstores are required")
+#         VECTORSTORE_CACHE["company"] = company_vectorstore
+        
+#         evidence_vectorstore = build_knowledge_base(
+#             files=evidence_objs,
+#             selected_model=selected_model,
+#             batch_size=_Cfg.DEFAULT_BATCH,
+#             delay_between_batches=_Cfg.DEFAULT_DELAY,
+#             max_retries=_Cfg.DEFAULT_RETRIES
+#         )
+#         VECTORSTORE_CACHE["evidence"] = evidence_vectorstore
+
+#         assessment_results = assess_evidence_with_kb(
+#             evidence_files=evidence_objs,
+#             kb_vectorstore=global_vectorstore,
+#             company_kb_vectorstore=company_vectorstore,
+#             selected_model=selected_model,
+#             max_workers=max_workers
+#         )
+
+#         assessment_summary = generate_executive_summary(assessment_results,selected_model)
+#         assessment_results.append(assessment_summary)
+#         workbook_path = generate_workbook(assessment_results, None)
+
+#         processing_summary = {
+#             "evidence_files": len(evidence_files),
+#             "evidence_documents": len(evidence_files),
+#             "assessment_results": len(assessment_results),
+#             "workbook_path": workbook_path,
+#             "global_vectors": getattr(global_vectorstore.index, "ntotal", 0),
+#             "company_vectors": getattr(company_vectorstore.index, "ntotal", 0),
+#             "processing_seconds": time.time() - t0,
+#             "model_used": selected_model,
+#             "max_workers": max_workers
+#         }
+
+#         return AssessmentResponse(
+#             success=True,
+#             message="Evidence assessment completed successfully",
+#             workbook_path=workbook_path,
+#             processing_summary=processing_summary
+#         )
+#     except Exception as e:
+#         return AssessmentResponse(
+#             success=False,
+#             message="Assessment failed",
+#             processing_summary={},
+#             error_details=str(e)
+#         )
+#     finally:
+#         for fh in evidence_objs:
+#             try: fh.close()
+#             except Exception: pass
+#         for p in tmp_paths:
+#             try: os.unlink(p)
+#             except Exception: pass
+
+
 @app.post(
     "/assess-evidence",
     response_model=AssessmentResponse,
@@ -371,11 +480,8 @@ async def build_kb(
 async def assess_evidence(
     selected_model: str = Form(...),
     max_workers: int = Form(4),
-    evidence_files: List[UploadFile] = File(...),
-    global_kb_files: List[UploadFile] = File(...),
-    company_kb_files: List[UploadFile] = File(...)
-):
-    rid = _req_id()
+    evidence_files: List[UploadFile] = File(...)    
+):   
     t0 = time.time()
 
     try:
@@ -384,67 +490,53 @@ async def assess_evidence(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 
     if not evidence_files:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Evidence files are required")
-    if not global_kb_files:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Global knowledge base files are required")
-    if not company_kb_files:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Company knowledge base files are required")
-
-    all_files = evidence_files + global_kb_files + company_kb_files
-    if _Cfg.MAX_FILES and len(all_files) > _Cfg.MAX_FILES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Total files exceed limit ({_Cfg.MAX_FILES})")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Evidence files are required")  
     
-    errs = []
-    for f in all_files:
-        errs.extend([f"{f.filename}: {e}" for e in _validate_upload(f)])
-    if errs:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "; ".join(errs))
+    evidence_objs: List[Any] = []
+    tmp_paths: List[str] = []       
+    file_results: List[FileResult] = []
+    base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    embeddings_for_load = OllamaEmbeddings(model=selected_model, base_url=base_url)
 
-    tmp_paths = []
-    global_kb_objs = []
-    company_kb_objs = []
-    evidence_objs = []
-
-    try:
-        for uf in global_kb_files:
-            ext = Path(uf.filename).suffix or ".tmp"
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
-            tmp.write(await uf.read()); tmp.close()
-            tmp_paths.append(tmp.name)
-            global_kb_objs.append(open(tmp.name, "rb"))
-
-        for uf in company_kb_files:
-            ext = Path(uf.filename).suffix or ".tmp"
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
-            tmp.write(await uf.read()); tmp.close()
-            tmp_paths.append(tmp.name)
-            company_kb_objs.append(open(tmp.name, "rb"))
-
+    try:  
         for uf in evidence_files:
+            start = time.time()
             ext = Path(uf.filename).suffix or ".tmp"
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
-            tmp.write(await uf.read()); tmp.close()
+            content = await uf.read()
+            tmp.write(content)
+            tmp.close()
             tmp_paths.append(tmp.name)
-            evidence_objs.append(open(tmp.name, "rb"))
-
-        global_vectorstore = build_knowledge_base(
-            files=global_kb_objs,
-            selected_model=selected_model,
-            batch_size=_Cfg.DEFAULT_BATCH,
-            delay_between_batches=_Cfg.DEFAULT_DELAY,
-            max_retries=_Cfg.DEFAULT_RETRIES
-        )
+            
+            # Create a file-like object that save_and_load_files expects
+            # Instead of opening as binary, create an object with .name and .read() method
+            class FileWrapper:
+                def __init__(self, filepath, filename):
+                    self.name = filename  # Original filename for extension detection
+                    self._path = filepath
+                
+                def read(self):
+                    with open(self._path, 'rb') as f:
+                        return f.read()
+            
+            evidence_objs.append(FileWrapper(tmp.name, uf.filename))
+            file_results.append(FileResult(
+                filename=uf.filename,
+                size_bytes=len(content),
+                status="saved",
+                processing_time=time.time() - start
+            ))
+       
+        global_vectorstore = load_faiss_vectorstore("saved_global_vectorstore", embeddings_for_load)
+        if not global_vectorstore:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "global vectorstores are required")
         VECTORSTORE_CACHE["global"] = global_vectorstore        
-
-        company_vectorstore = build_knowledge_base(
-            files=company_kb_objs,
-            selected_model=selected_model,
-            batch_size=_Cfg.DEFAULT_BATCH,
-            delay_between_batches=_Cfg.DEFAULT_DELAY,
-            max_retries=_Cfg.DEFAULT_RETRIES
-        )
+        
+        company_vectorstore = load_faiss_vectorstore("saved_company_vectorstore", embeddings_for_load)
+        if not company_vectorstore:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "company vectorstores are required")
         VECTORSTORE_CACHE["company"] = company_vectorstore
-
+        
         evidence_vectorstore = build_knowledge_base(
             files=evidence_objs,
             selected_model=selected_model,
@@ -454,9 +546,7 @@ async def assess_evidence(
         )
         VECTORSTORE_CACHE["evidence"] = evidence_vectorstore
 
-        company_kb_path = save_faiss_vectorstore(company_vectorstore,"saved_company_vectorstore")
-        global_kb_path = save_faiss_vectorstore(global_vectorstore,"saved_global_vectorstore")
-
+        # Get assessment results
         assessment_results = assess_evidence_with_kb(
             evidence_files=evidence_objs,
             kb_vectorstore=global_vectorstore,
@@ -464,15 +554,26 @@ async def assess_evidence(
             selected_model=selected_model,
             max_workers=max_workers
         )
-
+        
         assessment_summary = generate_executive_summary(assessment_results,selected_model)
         assessment_results.append(assessment_summary)
         workbook_path = generate_workbook(assessment_results, None)
 
+        # Generate executive summary separately
+        # assessment_summary = generate_executive_summary(assessment_results, selected_model)
+        
+        # Create a proper structure for the workbook generator
+        # Don't directly append to assessment_results - create a new structure
+        # workbook_data = {
+        #     "assessments": assessment_results,
+        #     "executive_summary": assessment_summary
+        # }
+        
+        # # Generate workbook with the properly structured data
+        # workbook_path = generate_workbook(workbook_data, None)
+
         processing_summary = {
             "evidence_files": len(evidence_files),
-            "global_kb_files": len(global_kb_files),
-            "company_kb_files": len(company_kb_files),
             "evidence_documents": len(evidence_files),
             "assessment_results": len(assessment_results),
             "workbook_path": workbook_path,
@@ -490,6 +591,8 @@ async def assess_evidence(
             processing_summary=processing_summary
         )
     except Exception as e:
+        logger.error(f"Assessment failed: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return AssessmentResponse(
             success=False,
             message="Assessment failed",
@@ -497,13 +600,10 @@ async def assess_evidence(
             error_details=str(e)
         )
     finally:
-        for fh in global_kb_objs + company_kb_objs + evidence_objs:
-            try: fh.close()
-            except Exception: pass
+        # Clean up temp files only (FileWrapper objects don't need closing)
         for p in tmp_paths:
             try: os.unlink(p)
             except Exception: pass
-
 # ---------------------------------------------------------------------------`-
 # Executive Summary Endpoint
 # ----------------------------------------------------------------------------

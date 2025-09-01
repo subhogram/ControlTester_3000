@@ -355,16 +355,17 @@ with st.expander("3️⃣ Upload files for assessment", expanded=True):
             #             assessment = json.load(f)
                   
             if assessment is None:
-                evidence_docs = save_and_load_files(evidence_files)
+                #evidence_docs = save_and_load_files(evidence_files)
                 assessment = assess_evidence_with_kb(
-                    evidence_docs,
+                    evidence_files,
                     st.session_state['kb_vectorstore'],
-                    st.session_state['company_kb_vectorstore']
+                    st.session_state['company_kb_vectorstore'],
+                    selected_model
                 )
                 # Render to image and save to a variable (PIL Image object)
                 
 
-                summary = llm_chain.generate_executive_summary(assessment)
+                summary = llm_chain.generate_executive_summary(assessment, selected_model)
                 assessment.append(summary)
                 # with open(ASSESSMENT_PATH, "w") as f:
                 #     json.dump(assessment, f, indent=2)
