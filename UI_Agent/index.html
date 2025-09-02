@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document Management System</title>
     <link rel="stylesheet" href="style.css">
+    <!-- Syntax highlighting theme for code blocks in chat -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 
@@ -142,7 +144,7 @@
                             <div class="build-section">
                                 <button class="btn btn--primary btn--full-width build-btn" id="general-build-btn"
                                     disabled>
-                                    🏗️ Build & Save Knowledge Base
+                                    🏗️ Upload & save documents
                                 </button>
                                 <p id="general-build-hint" class="build-hint">Select a model above to enable building
                                 </p>
@@ -208,7 +210,7 @@
                             <div class="build-section">
                                 <button class="btn btn--primary btn--full-width build-btn" id="company-build-btn"
                                     disabled>
-                                    🏗️ Build & Save Knowledge Base
+                                    🏗️ Upload & save documents
                                 </button>
                                 <p id="company-build-hint" class="build-hint">Select a model above to enable building
                                 </p>
@@ -429,6 +431,10 @@
     <!-- Toast Container -->
     <div id="toast-container" class="toast-container"></div>
 
+    <!-- Markdown + Sanitizer for rich assistant messages -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/build/highlight.min.js"></script>
     <script src="app.js"></script>
     <script src="chat.js"></script>
 </body>

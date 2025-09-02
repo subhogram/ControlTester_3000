@@ -10,6 +10,84 @@
     el.textContent = model;
   }
 
+  function renderMarkdownSafe(text) {
+    try {
+      // Prefer marked + DOMPurify if available
+      if (window.marked) {
+        if (typeof window.marked.setOptions === 'function') {
+          window.marked.setOptions({ gfm: true, breaks: true, headerIds: false, mangle: false });
+        }
+        const rawHtml = (typeof window.marked.parse === 'function')
+          ? window.marked.parse(String(text ?? ""))
+          : window.marked(String(text ?? ""));
+        const clean = window.DOMPurify ? window.DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } }) : rawHtml;
+        // Ensure safe link targets
+        const tmp = document.createElement('div');
+        tmp.innerHTML = clean;
+        tmp.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+        return tmp.innerHTML;
+      }
+    } catch { /* fall through to basic */ }
+
+    // Basic fallback: escape then minimal formatting
+    const safe = escapeHtml(String(text ?? ""));
+    // linkify URLs
+    const linkified = safe.replace(/(https?:\/\/[^\s)]+)(?![^<]*>|[^&]*;)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1<\/a>');
+    // preserve newlines
+    return linkified.replace(/\n/g, '<br>');
+  }
+
+  function enhanceBubble(el) {
+    try {
+      if (!el) return;
+      if (window.hljs) {
+        el.querySelectorAll('pre code').forEach(block => {
+          try { window.hljs.highlightElement(block); } catch { /* noop */ }
+        });
+      }
+
+      // Wrap code blocks with header (language + copy)
+      el.querySelectorAll('pre > code').forEach(codeEl => {
+        if (codeEl.closest('.code-block')) return; // already wrapped
+        const preEl = codeEl.parentElement;
+        if (!preEl) return;
+
+        let lang = 'text';
+        const m = String(codeEl.className || '').match(/(?:language|lang)-([a-z0-9_+-]+)/i);
+        if (m && m[1]) lang = m[1].toLowerCase();
+
+        const container = document.createElement('div');
+        container.className = 'code-block';
+        const header = document.createElement('div');
+        header.className = 'code-header';
+        const langEl = document.createElement('span');
+        langEl.className = 'code-lang';
+        langEl.textContent = lang;
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'code-copy';
+        copyBtn.textContent = 'Copy';
+        copyBtn.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(codeEl.innerText);
+            copyBtn.textContent = 'Copied';
+            copyBtn.classList.add('copied');
+            setTimeout(() => { copyBtn.textContent = 'Copy'; copyBtn.classList.remove('copied'); }, 1500);
+          } catch {
+            copyBtn.textContent = 'Failed';
+            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+          }
+        });
+        header.appendChild(langEl);
+        header.appendChild(copyBtn);
+
+        preEl.replaceWith(container);
+        container.appendChild(header);
+        container.appendChild(preEl);
+      });
+    } catch { /* ignore */ }
+  }
+
   function appendMessage(role, text) {
     const wrap = $("chat-messages");
     if (!wrap) return;
@@ -20,11 +98,16 @@
 
     const msg = document.createElement("div");
     msg.className = `chat-msg ${role}`;
+    const bubble = (role === "assistant") ? renderMarkdownSafe(text) : escapeHtml(text);
     msg.innerHTML = `
       <div class="chat-avatar">${role === "user" ? "🧑" : "🤖"}</div>
-      <div class="chat-bubble">${escapeHtml(text)}</div>
+      <div class="chat-bubble">${bubble}</div>
     `;
     wrap.appendChild(msg);
+    if (role === 'assistant') {
+      const b = msg.querySelector('.chat-bubble');
+      if (b) { b.classList.add('md'); enhanceBubble(b); }
+    }
     wrap.scrollTop = wrap.scrollHeight;
   }
 

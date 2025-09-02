@@ -672,7 +672,7 @@ class UIManager {
             this.debug.error("Build KB error", e);
         } finally {
             const btn = this.$(kind === "general" ? "general-build-btn" : "company-build-btn");
-            if (btn) { btn.disabled = false; btn.textContent = "🏗️ Build & Save Knowledge Base"; }
+            if (btn) { btn.disabled = false; btn.textContent = "🏗️ Upload & save documents"; }
         }
     }
 
@@ -876,14 +876,23 @@ class UIManager {
         const row = document.createElement("div");
         row.className = `chat-msg ${role}`;
         const ts = new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        const bubble = (role === 'assistant') ? this._renderMarkdownSafe(text) : this._escape(text);
         row.innerHTML = `
       <div class="chat-avatar">${role === "user" ? "🧑" : "🤖"}</div>
       <div>
-        <div class="chat-bubble">${this._escape(text)}</div>
+        <div class="chat-bubble">${bubble}</div>
         <div class="chat-meta">${ts}</div>
       </div>
     `;
         wrap.appendChild(row);
+        // Enhance assistant bubbles with syntax highlighting & markdown polish
+        if (role === 'assistant') {
+            const bubbleEl = row.querySelector('.chat-bubble');
+            if (bubbleEl) {
+                bubbleEl.classList.add('md');
+                this._enhanceBubble(bubbleEl);
+            }
+        }
         wrap.scrollTop = wrap.scrollHeight;
     }
 
@@ -1030,6 +1039,87 @@ class UIManager {
 
     _escape(s) {
         return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    _renderMarkdownSafe(text) {
+        try {
+            if (window.marked) {
+                if (typeof window.marked.setOptions === 'function') {
+                    window.marked.setOptions({ gfm: true, breaks: true, headerIds: false, mangle: false });
+                }
+                const raw = (typeof window.marked.parse === 'function')
+                  ? window.marked.parse(String(text ?? ""))
+                  : window.marked(String(text ?? ""));
+                const clean = window.DOMPurify ? window.DOMPurify.sanitize(raw, { USE_PROFILES: { html: true } }) : raw;
+                const tmp = document.createElement('div');
+                tmp.innerHTML = clean;
+                tmp.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
+                return tmp.innerHTML;
+            }
+        } catch { /* noop */ }
+
+        // Fallback: linkify + line breaks on escaped text
+        const safe = this._escape(String(text ?? ""));
+        const linkified = safe.replace(/(https?:\/\/[^\s)]+)(?![^<]*>|[^&]*;)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1<\/a>');
+        return linkified.replace(/\n/g, '<br>');
+    }
+
+    _enhanceBubble(bubbleEl) {
+        try {
+            if (!bubbleEl) return;
+            // Syntax highlighting for any code blocks
+            if (window.hljs) {
+                bubbleEl.querySelectorAll('pre code').forEach(block => {
+                    try { window.hljs.highlightElement(block); } catch { /* noop */ }
+                });
+            }
+
+            // Wrap code blocks with a header (language + copy button)
+            bubbleEl.querySelectorAll('pre > code').forEach(codeEl => {
+                // Skip if already wrapped
+                if (codeEl.closest('.code-block')) return;
+
+                const preEl = codeEl.parentElement;
+                if (!preEl) return;
+
+                // Detect language from className like "language-js" or "lang-js"
+                let lang = 'text';
+                const cls = String(codeEl.className || '');
+                const m = cls.match(/(?:language|lang)-([a-z0-9_+-]+)/i);
+                if (m && m[1]) lang = m[1].toLowerCase();
+
+                const container = document.createElement('div');
+                container.className = 'code-block';
+
+                const header = document.createElement('div');
+                header.className = 'code-header';
+                const langEl = document.createElement('span');
+                langEl.className = 'code-lang';
+                langEl.textContent = lang;
+                const copyBtn = document.createElement('button');
+                copyBtn.type = 'button';
+                copyBtn.className = 'code-copy';
+                copyBtn.textContent = 'Copy';
+                copyBtn.addEventListener('click', async () => {
+                    try {
+                        await navigator.clipboard.writeText(codeEl.innerText);
+                        copyBtn.textContent = 'Copied';
+                        copyBtn.classList.add('copied');
+                        setTimeout(() => { copyBtn.textContent = 'Copy'; copyBtn.classList.remove('copied'); }, 1500);
+                    } catch {
+                        copyBtn.textContent = 'Failed';
+                        setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+                    }
+                });
+                header.appendChild(langEl);
+                header.appendChild(copyBtn);
+
+                // Insert wrapper and move pre inside
+                preEl.replaceWith(container);
+                container.appendChild(header);
+                container.appendChild(preEl);
+            });
+        } catch { /* ignore styling errors */ }
     }
 }
 
