@@ -225,7 +225,8 @@ async def chat(request: ChatRequest):
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 
     base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-    embeddings_for_load = OllamaEmbeddings(model=request.selected_model, base_url=base_url)
+    embed_name = request.embedding_model or os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
+    embeddings_for_load = OllamaEmbeddings(model=embed_name, base_url=base_url)
 
     loaded_stores: Dict[str, Any] = {"global": None, "company": None, "evidence": None, "chat": None}
     loaded_paths: Dict[str, Optional[str]] = {"global": None, "company": None, "evidence": None, "chat": None}
@@ -242,6 +243,9 @@ async def chat(request: ChatRequest):
         if request.chat_kb_path and Path(request.chat_kb_path).exists():
             loaded_stores['chat'] = load_faiss_vectorstore(request.chat_kb_path, embeddings_for_load)
             loaded_paths['chat'] = request.chat_kb_path
+        if VECTORSTORE_CACHE["evidence"]:
+            loaded_stores['evidence'] = VECTORSTORE_CACHE["evidence"]
+            loaded_paths['evidence'] = "in-memory"
     except FileNotFoundError as fe:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(fe))
     except Exception as e:
@@ -503,7 +507,8 @@ async def assess_evidence(
     tmp_paths: List[str] = []       
     file_results: List[FileResult] = []
     base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-    embeddings_for_load = OllamaEmbeddings(model=selected_model, base_url=base_url)
+    embed_name = os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
+    embeddings_for_load = OllamaEmbeddings(model=embed_name, base_url=base_url)
 
     try:  
         for uf in evidence_files:

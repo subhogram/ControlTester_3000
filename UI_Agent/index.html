@@ -49,8 +49,13 @@
 
             <!-- Sidebar Footer / Utilities -->
             <div class="sidebar-footer">
-                <button id="sidebar-utility-btn" class="sidebar-utility-btn" aria-haspopup="true" aria-expanded="false" title="User menu">
-                    <img src="user.png" alt="User" class="utility-icon" />
+                <button id="sidebar-utility-btn" class="sidebar-utility-btn" aria-haspopup="true" aria-expanded="false" title="Account">
+                    <div class="utility-avatar" aria-hidden="true">U</div>
+                    <div class="utility-meta">
+                        <span class="utility-name">User</span>
+                        <span class="utility-plan">Free</span>
+                    </div>
+                    <span class="utility-caret" aria-hidden="true">▾</span>
                 </button>
                 <div id="sidebar-utility-menu" class="sidebar-utility-menu hidden" role="menu" aria-label="Quick actions">
                     <button class="utility-item" id="util-login" role="menuitem">🔐 Login</button>
@@ -62,43 +67,43 @@
 
         <!-- Main Content -->
         <main class="main-content">
+            <!-- Global Model Configuration (visible across all tabs) -->
+            <div class="model-selection-header">
+                <div>
+                    <h2>Model Configuration</h2>
+                    <p>Select and configure your Ollama model for document processing</p>
+                </div>
+
+                <div class="model-selector-container">
+                    <!-- Initial Model Selector -->
+                    <div id="initial-model-selector" class="model-selector">
+                        <select id="session-model-select" class="form-control">
+                            <option value="">Loading models...</option>
+                        </select>
+                        <div id="model-validation" class="model-validation" style="display: none;"></div>
+                    </div>
+
+                    <!-- Selected Model Display -->
+                    <div id="selected-model-display" class="selected-model-display" style="display: none;">
+                        <div class="selected-model-info">
+                            <div>
+                                <div class="model-label">Selected Model</div>
+                                <div class="model-name" id="selected-model-name">llama2</div>
+                                <div class="model-status">Ready for processing</div>
+                            </div>
+                        </div>
+                        <button id="change-model-btn" class="btn btn--outline change-model-btn">Change
+                            Model</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Document Management Tab -->
             <div id="document-management" class="tab-content active">
                 <div class="content-header">
                     <h1>Document Management</h1>
                     <p class="content-description">Upload documents and build knowledge bases for AI-powered document
                         retrieval</p>
-                </div>
-
-                <!-- Model Configuration -->
-                <div class="model-selection-header">
-                    <div>
-                        <h2>Model Configuration</h2>
-                        <p>Select and configure your Ollama model for document processing</p>
-                    </div>
-
-                    <div class="model-selector-container">
-                        <!-- Initial Model Selector -->
-                        <div id="initial-model-selector" class="model-selector">
-                            <select id="session-model-select" class="form-control">
-                                <option value="">Loading models...</option>
-                            </select>
-                            <div id="model-validation" class="model-validation" style="display: none;"></div>
-                        </div>
-
-                        <!-- Selected Model Display -->
-                        <div id="selected-model-display" class="selected-model-display" style="display: none;">
-                            <div class="selected-model-info">
-                                <div>
-                                    <div class="model-label">Selected Model</div>
-                                    <div class="model-name" id="selected-model-name">llama2</div>
-                                    <div class="model-status">Ready for processing</div>
-                                </div>
-                            </div>
-                            <button id="change-model-btn" class="btn btn--outline change-model-btn">Change
-                                Model</button>
-                        </div>
-                    </div>
                 </div>
 
                 <!-- Document Sections -->
@@ -303,31 +308,6 @@
 
                     <!-- Assessment Sidebar -->
                     <div class="assessment-sidebar">
-                        <!-- Assessment Status Card -->
-                        <div class="assessment-card">
-                            <div class="card-header">
-                                <h4>Assessment Status</h4>
-                            </div>
-                            <div class="card-body">
-                                <div class="status-display">
-                                    <div class="status-item">
-                                        <span class="status-label">Processing Status:</span>
-                                        <span class="status-value" id="assessment-processing-status">Ready</span>
-                                    </div>
-                                    <div class="status-item">
-                                        <span class="status-label">Report Status:</span>
-                                        <span class="status-value" id="report-status">Not generated</span>
-                                    </div>
-                                    <div class="status-item" id="report-download-item" style="display: none;">
-                                        <button id="download-report-btn"
-                                            class="btn btn--primary btn--sm btn--full-width">
-                                            📥 Download Report
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
                         <!-- Assessment Results Summary -->
                         <div id="assessment-results-summary" class="assessment-card" style="display: none;">
                             <div class="card-header">

@@ -17,6 +17,7 @@ import os
 
 # Get Ollama base URL from environment variable
 OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+OLLAMA_EMBEDDING_MODEL = os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
 
 
 
@@ -109,7 +110,7 @@ selected_model = st.session_state['selected_model']
 if os.path.exists(VECTORSTORE_PATH) and not st.session_state.get('kb_ready', False):    
     st.session_state['kb_vectorstore'] = FAISS.load_local(
         VECTORSTORE_PATH,
-        OllamaEmbeddings(model="bge-m3:latest", base_url=OLLAMA_BASE_URL),
+        OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL),
         allow_dangerous_deserialization=True
     )
     st.session_state['kb_ready'] = True
@@ -240,7 +241,7 @@ with st.expander("1️⃣ Upload training documents", expanded=True):
 if os.path.exists(COMPANY_VECTORSTORE_PATH) and not st.session_state.get('company_files_ready', False):
     st.session_state['company_kb_vectorstore'] = FAISS.load_local(
         COMPANY_VECTORSTORE_PATH,
-        OllamaEmbeddings(model="bge-m3:latest", base_url=OLLAMA_BASE_URL),
+        OllamaEmbeddings(model=OLLAMA_EMBEDDING_MODEL, base_url=OLLAMA_BASE_URL),
         allow_dangerous_deserialization=True
     )
     st.session_state['company_files_ready'] = True  

@@ -1569,30 +1569,34 @@ select.form-control {
   bottom: 12px;
   left: 0;
   right: 0;
-  padding: 0 var(--space-12);
+  padding: var(--space-12); /* spacing from sidebar edges & screen */
   display: flex;
   justify-content: center;
 }
 
 .sidebar-utility-btn {
-  width: 36px; height: 36px;
+  width: 100%;
+  height: auto;
+  padding: var(--space-12) var(--space-20);
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-surface);
   color: var(--color-text);
-  display: inline-flex; align-items: center; justify-content: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
   cursor: pointer;
   box-shadow: var(--shadow-sm);
+  transition: background var(--duration-fast) var(--ease-standard),
+              color var(--duration-fast) var(--ease-standard),
+              box-shadow var(--duration-fast) var(--ease-standard);
 }
-.sidebar-utility-btn .utility-icon {
-  width: 22px; height: 22px; object-fit: contain; display: block;
-}
-.sidebar-utility-btn:hover { box-shadow: var(--shadow-md); }
+.sidebar-utility-btn:hover { box-shadow: var(--shadow-md); background-color: var(--color-secondary); }
 
 .sidebar-utility-menu {
   position: absolute;
   bottom: 56px; /* above the button */
-  left: 16px; right: 16px;
+  left: var(--space-12); right: var(--space-12);
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -1620,6 +1624,41 @@ select.form-control {
 .app-container.sidebar-collapsed .sidebar-utility-menu {
   left: 80px; right: auto; width: 240px;
 }
+
+/* Collapsed behavior: center avatar, hide details */
+.app-container.sidebar-collapsed .sidebar-utility-btn {
+  padding: var(--space-12) var(--space-20);
+  justify-content: center;
+}
+.app-container.sidebar-collapsed .sidebar-utility-btn .utility-meta,
+.app-container.sidebar-collapsed .sidebar-utility-btn .utility-caret,
+.app-container.sidebar-collapsed .sidebar-utility-btn .utility-text { display: none; }
+.app-container.sidebar-collapsed .sidebar-utility-btn .utility-avatar { margin-right: 0; }
+
+/* ChatGPT-like utility avatar and meta */
+.utility-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-full);
+  background: radial-gradient(100% 100% at 30% 20%, rgba(var(--color-success-rgb), 0.95) 0%, var(--color-success) 65%, rgba(var(--color-success-rgb), 0.9) 100%);
+  color: var(--color-btn-primary-text);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: var(--font-weight-bold);
+  font-size: 14px;
+  border: 1px solid var(--color-card-border-inner);
+  box-shadow: var(--shadow-xs);
+  flex-shrink: 0;
+  margin-right: var(--space-12);
+}
+.utility-meta { display: flex; flex-direction: column; gap: 2px; }
+.utility-name { font-size: var(--font-size-sm); color: var(--color-text); line-height: 1.1; }
+.utility-plan { font-size: var(--font-size-xs); color: var(--color-text-secondary); line-height: 1.1; }
+.utility-caret { margin-left: auto; color: var(--color-text-secondary); }
+
+/* Better focus styles */
+.sidebar-utility-btn:focus-visible { outline: var(--focus-outline); outline-offset: 2px; }
 
 
 /* Hide toggle on small screens where sidebar becomes bottom nav */

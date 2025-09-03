@@ -57,17 +57,19 @@ if [ $retry_count -eq $max_retries ]; then
 fi
 
 echo ""
-echo "🔄 Pulling tinyllama:latest model..."
+echo "🔄 Pulling OLLAMA_LLM model..."
 echo "=================================="
 
 # Pull the tinyllama model
-echo "Running: docker exec -it ollama ollama pull tinyllama:latest"
+echo "Running: docker exec -it ollama ollama pull OLLAMA_LLM"
 docker exec ollama ollama pull llama3:latest
+docker exec ollama ollama pull gemma3:latest
+docker exec ollama ollama pull nomic-embed-text:latest
 echo ""
 echo "🎉 Setup complete!"
 echo "=================="
 echo "✅ Docker containers are running"
-echo "✅ tinyllama:latest model has been pulled"
+echo "✅ OLLAMA_LLM model has been pulled"
 echo ""
 echo "Your application should now be available at:"
 echo "🌐 Streamlit App: http://localhost:8501"

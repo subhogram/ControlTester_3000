@@ -24,9 +24,10 @@ warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 # Get Ollama base URL from environment variable
 OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+OLLAMA_EMBEDDING_MODEL = os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
 
-# embeddings = OllamaEmbeddings(model="bge-m3:latest",base_url=OLLAMA_BASE_URL)  # Ensure faiss-gpu is installed for GPU usage
-# llm = OllamaLLM(model="bge-m3:latest", base_url=OLLAMA_BASE_URL, temperature = 0)
+# embeddings = OllamaEmbeddings(model="nomic-embed-text:latest",base_url=OLLAMA_BASE_URL)  # Ensure faiss-gpu is installed for GPU usage
+# llm = OllamaLLM(model="nomic-embed-text:latest", base_url=OLLAMA_BASE_URL, temperature = 0)
 
 # Setup Logging
 logging.basicConfig(
@@ -36,15 +37,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def initialize(selected_model):
+def initialize(selected_model: str, embedding_model: str | None = None):
     """
-    Initializes the embeddings and llm objects with the selected_model.
-    This function should be called from app.py with the desired model name.
-    """  
+    Initialize LLM (and optionally embeddings) using provided models.
+
+    - LLM uses `selected_model` (chat/inference model like gemma3, llama3, etc.).
+    - Embeddings use `embedding_model` if provided, otherwise default from env `OLLAMA_EMBEDDING_MODEL`.
+      Note: Vectorstores carry their own embedding object; global embeddings are not required
+      for similarity once a store is created/loaded.
+    """
     global llm
     global embeddings
-    embeddings = OllamaEmbeddings(model=selected_model,base_url=OLLAMA_BASE_URL)
     llm = OllamaLLM(model=selected_model, base_url=OLLAMA_BASE_URL)
+    # Provide a sensible embeddings default without coupling to the LLM model
+    embed_name = embedding_model or OLLAMA_EMBEDDING_MODEL
+    embeddings = OllamaEmbeddings(model=embed_name, base_url=OLLAMA_BASE_URL)
     
 # LangChain components
 text_splitter = RecursiveCharacterTextSplitter(
@@ -57,12 +64,21 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 # ----------------- BASE KNOWLEDGE BASE BUILDER -----------------------
 
-def build_knowledge_base(files, selected_model, batch_size=15, delay_between_batches=0.2, max_retries=3):
+def build_knowledge_base(
+    files,
+    selected_model=None,
+    batch_size=15,
+    delay_between_batches=0.2,
+    max_retries=3,
+    embedding_model: str | None = None,
+):
     """
     Build a FAISS vectorstore from a list of documents with timeout handling.
     This is a drop-in replacement for your existing function.
     """
-    initialize(selected_model)
+    # Use a dedicated embeddings-capable model (do not use chat model)
+    embed_name = embedding_model or OLLAMA_EMBEDDING_MODEL
+    embedding_obj = OllamaEmbeddings(model=embed_name, base_url=OLLAMA_BASE_URL)
     start = time.time()
     all_documents = []
 
@@ -104,10 +120,10 @@ def build_knowledge_base(files, selected_model, batch_size=15, delay_between_bat
                 try:
                     if kb_vectorstore is None:
                         # Create initial vectorstore from first batch
-                        kb_vectorstore = FAISS.from_documents(batch_docs, embeddings)
+                        kb_vectorstore = FAISS.from_documents(batch_docs, embedding_obj)
                     else:
                         # Create temporary vectorstore for this batch and merge
-                        temp_vectorstore = FAISS.from_documents(batch_docs, embeddings)
+                        temp_vectorstore = FAISS.from_documents(batch_docs, embedding_obj)
                         kb_vectorstore.merge_from(temp_vectorstore)
                     
                     batch_success = True
@@ -388,4 +404,3 @@ def generate_executive_summary(assessments, selected_model):
     return {
         "executive_summary": summary
     }
-
