@@ -79,7 +79,40 @@ services:
         condition: service_healthy
     networks:
       - appnet
-
+    
+  ui_agent:
+    build:
+      context: ./UI_Agent
+      dockerfile: Dockerfile
+    container_name: ui_agent
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://fastapi_api:8000
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - NODE_ENV=production
+    depends_on:
+      fastapi_api:
+        condition: service_started
+    networks:
+      - appnet
+    volumes:
+      - ./UI_Agent:/app:delegated
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.5'
+        reservations:
+          memory: 128m
+          cpus: '0.25'
 
 volumes:
   ollama_data:
