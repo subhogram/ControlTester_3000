@@ -19,13 +19,13 @@ services:
       - ollama_data:/root/.ollama
     
     # 🚀 GPU ACCELERATION CONFIGURATION
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all                   # Use all available GPUs
-    #           capabilities: [gpu]          # Request GPU capabilities
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all                   # Use all available GPUs
+              capabilities: [gpu]          # Request GPU capabilities
     
     # Improved healthcheck with longer startup time for GPU initialization
     healthcheck:
