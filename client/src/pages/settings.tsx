@@ -85,6 +85,7 @@ export default function SettingsPage() {
       }));
       setGeneralContextFiles((prev) => [...prev, ...newFiles]);
 
+      return result;
     } catch (error) {
       console.error("Error uploading files:", error);
       throw error;
@@ -132,6 +133,7 @@ export default function SettingsPage() {
       }));
       setCompanyPolicyFiles((prev) => [...prev, ...newFiles]);
 
+      return result;
     } catch (error) {
       console.error("Error uploading files:", error);
       throw error;

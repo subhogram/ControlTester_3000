@@ -15,7 +15,7 @@ interface ContextFileUploadProps {
   description: string;
   files: ContextFile[];
   onRemoveFile: (id: string) => void;
-  onUpload: (files: File[]) => void;
+  onUpload: (files: File[]) => Promise<any>;
   testId: string;
   maxFiles?: number;
   acceptedFileTypes?: string;
@@ -107,12 +107,18 @@ export default function ContextFileUpload({
     if (selectedFiles.length > 0) {
       setIsUploading(true);
       try {
-        await onUpload(selectedFiles);
+        const result = await onUpload(selectedFiles);
         setSelectedFiles([]);
         setCurrentPage(0);
+        
+        const stats = result?.processing_summary;
+        const statsMessage = stats 
+          ? `Files: ${stats.files} | Vectors: ${stats.vectors || 'N/A'} | Time: ${stats.processing_seconds?.toFixed(2)}s | Model: ${stats.model}`
+          : `Successfully uploaded ${selectedFiles.length} file(s)`;
+        
         toast({
-          title: "✓ Success",
-          description: `Successfully uploaded ${selectedFiles.length} file(s) and built knowledge base`,
+          title: "✓ Knowledge Base Built Successfully",
+          description: statsMessage,
           className: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
         });
       } catch (error) {
