@@ -1,5 +1,5 @@
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { User, Bot } from "lucide-react";
+import { User, Bot, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface ChatMessageProps {
@@ -14,6 +14,7 @@ export default function ChatMessage({
   timestamp,
 }: ChatMessageProps) {
   const isUser = role === "user";
+  const isLoading = content === "loading";
 
   return (
     <div
@@ -40,9 +41,16 @@ export default function ChatMessage({
               : "bg-card border border-card-border text-card-foreground hover:border-primary/30 hover:shadow-sm"
           )}
         >
-          <p className="text-base whitespace-pre-wrap break-words" data-testid="text-message-content">
-            {content}
-          </p>
+          {isLoading ? (
+            <div className="flex items-center gap-2" data-testid="spinner-loading">
+              <Loader2 className="h-4 w-4 animate-spin text-primary" />
+              <span className="text-base text-muted-foreground">Thinking...</span>
+            </div>
+          ) : (
+            <p className="text-base whitespace-pre-wrap break-words" data-testid="text-message-content">
+              {content}
+            </p>
+          )}
         </div>
         {timestamp && (
           <span className="text-xs text-muted-foreground px-2" data-testid="text-timestamp">

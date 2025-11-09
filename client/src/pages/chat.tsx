@@ -165,6 +165,19 @@ export default function ChatPage() {
       }
     }
 
+    // Add loading message
+    const loadingMessageId = (Date.now() + 1).toString();
+    const loadingMessage: Message = {
+      id: loadingMessageId,
+      role: "assistant",
+      content: "loading",
+      timestamp: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    };
+    setMessages((prev) => [...prev, loadingMessage]);
+
     try {
       const response = await chatMutation.mutateAsync({
         user_input: content,
@@ -172,8 +185,9 @@ export default function ChatPage() {
         has_attachments: hasAttachments,
       });
 
+      // Replace loading message with actual response
       const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: loadingMessageId,
         role: "assistant",
         content: response.response || "No response received",
         timestamp: new Date().toLocaleTimeString([], {
@@ -181,10 +195,15 @@ export default function ChatPage() {
           minute: "2-digit",
         }),
       };
-      setMessages((prev) => [...prev, aiMessage]);
+      setMessages((prev) => prev.map(msg => msg.id === loadingMessageId ? aiMessage : msg));
+
+      // Clear uploaded files after successful response
+      setUploadedFiles([]);
+      setHasAttachments(false);
     } catch (error) {
+      // Replace loading message with error message
       const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
+        id: loadingMessageId,
         role: "assistant",
         content: "❌ Failed to get response. Please ensure the external API is running at http://localhost:8000",
         timestamp: new Date().toLocaleTimeString([], {
@@ -192,7 +211,7 @@ export default function ChatPage() {
           minute: "2-digit",
         }),
       };
-      setMessages((prev) => [...prev, errorMessage]);
+      setMessages((prev) => prev.map(msg => msg.id === loadingMessageId ? errorMessage : msg));
     }
   };
 

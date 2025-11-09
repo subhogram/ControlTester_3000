@@ -108,13 +108,14 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 2. On first message send:
    - Frontend calls `http://localhost:8000/build-knowledge-base` directly
    - FormData parameters: `selected_model`, `kb_type=chat`, `batch_size=15`, `delay_between_batches=0.2`, `max_retries=3`, files
-   - Creates `chat_attachment_vectorstore/` automatically
+   - Creates `chat_attachment_vectorstore/` automatically (in-memory only)
    - Shows "Processing..." badge
 3. After vectorstore built:
    - Shows green "✓ Chat Attachments Ready" toast with stats
    - Shows green "Ready" badge in upload bar
 4. User sends chat message:
    - Frontend calls `http://localhost:8000/chat` directly (no backend proxy)
+   - **Loading state**: Displays spinner with "Thinking..." text
    - JSON payload:
    ```json
    {
@@ -127,6 +128,7 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
    ```
 5. External API auto-loads all available vectorstores and returns AI response
 6. Frontend displays response in chat window
+7. **Auto-cleanup**: Uploaded files are automatically cleared after successful response
 
 ### Vectorstore Management
 **All operations call external API directly from frontend:**
