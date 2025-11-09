@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
-import { ArrowLeft, Trash2, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, CheckCircle2 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import ContextFileUpload from "@/components/ContextFileUpload";
@@ -100,28 +100,6 @@ export default function SettingsPage() {
     },
   });
 
-  // Delete vectorstore mutation
-  const deleteVectorstore = useMutation({
-    mutationFn: async (type: string) => {
-      return await apiRequest("DELETE", `/api/vectorstore/${type}`);
-    },
-    onSuccess: (_, type) => {
-      loadedVectorstores.current.delete(type);
-      queryClient.invalidateQueries({ queryKey: [`/api/vectorstore/${type}`] });
-      toast({
-        title: "✓ Deleted Successfully",
-        description: `${type === "global" ? "General Context" : "Company Policy"} vectorstore has been deleted`,
-        className: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
-      });
-    },
-    onError: (error) => {
-      toast({
-        title: "✗ Delete Failed",
-        description: error instanceof Error ? error.message : "Failed to delete vectorstore",
-        variant: "destructive",
-      });
-    },
-  });
 
   useEffect(() => {
     if (selectedModel) {
@@ -343,17 +321,6 @@ export default function SettingsPage() {
                     </CardDescription>
                   )}
                 </div>
-                {globalVectorstore?.exists && (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => deleteVectorstore.mutate("global")}
-                    disabled={deleteVectorstore.isPending}
-                    data-testid="button-delete-global-vectorstore"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
               </div>
             </CardHeader>
             <CardContent>
@@ -395,17 +362,6 @@ export default function SettingsPage() {
                     </CardDescription>
                   )}
                 </div>
-                {companyVectorstore?.exists && (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => deleteVectorstore.mutate("company")}
-                    disabled={deleteVectorstore.isPending}
-                    data-testid="button-delete-company-vectorstore"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                )}
               </div>
             </CardHeader>
             <CardContent>

@@ -84,24 +84,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Delete vectorstore
-  app.delete("/api/vectorstore/:type", async (req, res) => {
-    try {
-      const { type } = req.params;
-      const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
-      const vectorstorePath = path.join(process.cwd(), folderName);
-      
-      if (fs.existsSync(vectorstorePath)) {
-        fs.rmSync(vectorstorePath, { recursive: true, force: true });
-        return res.json({ success: true, message: "Vectorstore deleted successfully" });
-      } else {
-        return res.status(404).json({ error: "Vectorstore not found" });
-      }
-    } catch (error) {
-      console.error("Error deleting vectorstore:", error);
-      return res.status(500).json({ error: "Failed to delete vectorstore" });
-    }
-  });
 
   // Save vectorstore to disk
   app.post("/api/vectorstore/save/:type", async (req, res) => {
