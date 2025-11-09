@@ -35,6 +35,7 @@ export default function ContextFileUpload({
 }: ContextFileUploadProps) {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [currentPage, setCurrentPage] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
   const { toast } = useToast();
   const filesPerPage = 4;
 
@@ -102,11 +103,26 @@ export default function ContextFileUpload({
     setCurrentPage(0);
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (selectedFiles.length > 0) {
-      onUpload(selectedFiles);
-      setSelectedFiles([]);
-      setCurrentPage(0);
+      setIsUploading(true);
+      try {
+        await onUpload(selectedFiles);
+        setSelectedFiles([]);
+        setCurrentPage(0);
+        toast({
+          title: "Success",
+          description: `Successfully uploaded ${selectedFiles.length} file(s)`,
+        });
+      } catch (error) {
+        toast({
+          title: "Upload failed",
+          description: error instanceof Error ? error.message : "Failed to upload files",
+          variant: "destructive",
+        });
+      } finally {
+        setIsUploading(false);
+      }
     }
   };
 
@@ -171,6 +187,7 @@ export default function ContextFileUpload({
                 onClick={handleClearAll}
                 variant="outline"
                 size="sm"
+                disabled={isUploading}
                 data-testid={`button-clear-all-${testId}`}
               >
                 Clear All
@@ -178,9 +195,10 @@ export default function ContextFileUpload({
               <Button
                 onClick={handleUpload}
                 size="sm"
+                disabled={isUploading}
                 data-testid={`button-upload-${testId}`}
               >
-                Upload Files
+                {isUploading ? "Uploading..." : "Upload Files"}
               </Button>
             </div>
           </div>

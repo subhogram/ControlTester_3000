@@ -48,26 +48,94 @@ export default function SettingsPage() {
     }
   }, [models, selectedModel]);
 
-  const handleGeneralContextUpload = (files: File[]) => {
-    const newFiles = files.map((file) => ({
-      id: `${Date.now()}-${Math.random()}`,
-      filename: file.name,
-      uploadedAt: "Just now",
-    }));
-    setGeneralContextFiles((prev) => [...prev, ...newFiles]);
+  const handleGeneralContextUpload = async (files: File[]) => {
+    try {
+      const selectedModel = localStorage.getItem("selectedModel") || models?.[0]?.value;
+      if (!selectedModel) {
+        throw new Error("Please select a model first");
+      }
+
+      const formData = new FormData();
+      formData.append("selected_model", selectedModel);
+      formData.append("batch_size", "15");
+      formData.append("delay_between_batches", "0.2");
+      formData.append("max_retries", "3");
+      formData.append("kb_type", "global");
+
+      files.forEach((file) => {
+        formData.append("files", file);
+      });
+
+      const response = await fetch("http://localhost:8000/build-knowledge-base", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || "Failed to build knowledge base");
+      }
+
+      const result = await response.json();
+      
+      const newFiles = files.map((file) => ({
+        id: `${Date.now()}-${Math.random()}`,
+        filename: file.name,
+        uploadedAt: "Just now",
+      }));
+      setGeneralContextFiles((prev) => [...prev, ...newFiles]);
+
+    } catch (error) {
+      console.error("Error uploading files:", error);
+      throw error;
+    }
   };
 
   const handleGeneralContextRemove = (id: string) => {
     setGeneralContextFiles((prev) => prev.filter((file) => file.id !== id));
   };
 
-  const handleCompanyPolicyUpload = (files: File[]) => {
-    const newFiles = files.map((file) => ({
-      id: `${Date.now()}-${Math.random()}`,
-      filename: file.name,
-      uploadedAt: "Just now",
-    }));
-    setCompanyPolicyFiles((prev) => [...prev, ...newFiles]);
+  const handleCompanyPolicyUpload = async (files: File[]) => {
+    try {
+      const selectedModel = localStorage.getItem("selectedModel") || models?.[0]?.value;
+      if (!selectedModel) {
+        throw new Error("Please select a model first");
+      }
+
+      const formData = new FormData();
+      formData.append("selected_model", selectedModel);
+      formData.append("batch_size", "15");
+      formData.append("delay_between_batches", "0.2");
+      formData.append("max_retries", "3");
+      formData.append("kb_type", "company");
+
+      files.forEach((file) => {
+        formData.append("files", file);
+      });
+
+      const response = await fetch("http://localhost:8000/build-knowledge-base", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || "Failed to build knowledge base");
+      }
+
+      const result = await response.json();
+      
+      const newFiles = files.map((file) => ({
+        id: `${Date.now()}-${Math.random()}`,
+        filename: file.name,
+        uploadedAt: "Just now",
+      }));
+      setCompanyPolicyFiles((prev) => [...prev, ...newFiles]);
+
+    } catch (error) {
+      console.error("Error uploading files:", error);
+      throw error;
+    }
   };
 
   const handleCompanyPolicyRemove = (id: string) => {
