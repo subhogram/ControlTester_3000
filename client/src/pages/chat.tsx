@@ -131,6 +131,9 @@ export default function ChatPage() {
       return;
     }
 
+    // Track if we have attachments for this message
+    let currentHasAttachments = hasAttachments;
+
     // Process uploaded files if any
     if (uploadedFiles.length > 0 && !hasAttachments) {
       setIsProcessingFiles(true);
@@ -141,6 +144,7 @@ export default function ChatPage() {
         });
 
         setHasAttachments(true);
+        currentHasAttachments = true; // Update local variable immediately
         
         const stats = uploadResult?.processing_summary;
         const statsMessage = stats 
@@ -182,7 +186,7 @@ export default function ChatPage() {
       const response = await chatMutation.mutateAsync({
         user_input: content,
         selected_model: selectedModel,
-        has_attachments: hasAttachments,
+        has_attachments: currentHasAttachments,
       });
 
       // Replace loading message with actual response
