@@ -63,8 +63,8 @@ export default function ChatPage() {
       const payload: any = {
         selected_model,
         user_input,
-        global_kb_path: "saved_global_vectorstore",
-        company_kb_path: "saved_company_vectorstore",
+        global_kb_path: "global_kb_vectorstore",
+        company_kb_path: "company_kb_vectorstore",
       };
       
       // If there are chat attachments, include the path

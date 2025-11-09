@@ -121,8 +121,8 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
    {
      "selected_model": "model_name",
      "user_input": "user question",
-     "global_kb_path": "saved_global_vectorstore",
-     "company_kb_path": "saved_company_vectorstore",
+     "global_kb_path": "global_kb_vectorstore",
+     "company_kb_path": "company_kb_vectorstore",
      "chat_kb_path": "chat_attachment_vectorstore"  // if has_attachments
    }
    ```
