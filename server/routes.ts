@@ -31,39 +31,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { type } = req.params;
       const { model_name } = req.query;
       
-      const folderName = type === "global" ? "saved_global_vectorstore" : "saved_company_vectorstore";
+      const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
       const vectorstorePath = path.join(process.cwd(), folderName);
       
       // Check if folder exists on disk
       if (!fs.existsSync(vectorstorePath)) {
-        return res.json({ exists: false, path: folderName });
+        return res.json({ exists: false, path: folderName, vector_count: 0 });
       }
 
       // If model_name is provided, try to load the vectorstore
       if (model_name) {
         try {
-          const formData = new URLSearchParams();
+          const FormData = (await import("form-data")).default;
+          const formData = new FormData();
           formData.append("dir_path", folderName);
           formData.append("kb_type", type);
           formData.append("model_name", model_name as string);
 
           const response = await fetch(`http://localhost:8000/load-vectorstore`, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: formData.toString(),
+            body: formData as any,
           });
 
           if (response.ok) {
             const data = await response.json();
-            const stats = fs.statSync(vectorstorePath);
-            return res.json({
-              exists: true,
-              path: folderName,
-              vector_count: data.ntotal || 0,
-              last_modified: stats.mtime.toISOString(),
-            });
+            if (data?.success) {
+              const stats = fs.statSync(vectorstorePath);
+              return res.json({
+                exists: true,
+                path: folderName,
+                vector_count: data.ntotal ?? data.vector_count ?? 0,
+                last_modified: stats.mtime.toISOString(),
+              });
+            }
           }
         } catch (loadError) {
           console.warn("Failed to load vectorstore, but it exists on disk:", loadError);
@@ -75,6 +75,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.json({
         exists: true,
         path: folderName,
+        vector_count: 0,
         last_modified: stats.mtime.toISOString(),
       });
     } catch (error) {
@@ -87,7 +88,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/vectorstore/:type", async (req, res) => {
     try {
       const { type } = req.params;
-      const folderName = type === "global" ? "saved_global_vectorstore" : "saved_company_vectorstore";
+      const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
       const vectorstorePath = path.join(process.cwd(), folderName);
       
       if (fs.existsSync(vectorstorePath)) {
@@ -106,19 +107,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/vectorstore/save/:type", async (req, res) => {
     try {
       const { type } = req.params;
-      const folderName = type === "global" ? "saved_global_vectorstore" : "saved_company_vectorstore";
+      const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
 
       // Call external API to save the vectorstore using FormData
-      const formData = new URLSearchParams();
+      const FormData = (await import("form-data")).default;
+      const formData = new FormData();
       formData.append("dir_path", folderName);
       formData.append("kb_type", type);
 
       const response = await fetch(`http://localhost:8000/save-vectorstore`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: formData.toString(),
+        body: formData as any,
       });
 
       if (!response.ok) {
@@ -144,7 +143,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "model_name is required" });
       }
 
-      const folderName = type === "global" ? "saved_global_vectorstore" : "saved_company_vectorstore";
+      const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
       const vectorstorePath = path.join(process.cwd(), folderName);
 
       // Check if vectorstore exists on disk
@@ -153,17 +152,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Call external API to load the vectorstore using FormData
-      const formData = new URLSearchParams();
+      const FormData = (await import("form-data")).default;
+      const formData = new FormData();
       formData.append("dir_path", folderName);
       formData.append("kb_type", type);
       formData.append("model_name", model_name);
 
       const response = await fetch(`http://localhost:8000/load-vectorstore`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: formData.toString(),
+        body: formData as any,
       });
 
       if (!response.ok) {
