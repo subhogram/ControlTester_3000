@@ -57,6 +57,27 @@ export default function ChatPage() {
     },
   });
 
+  const loadVectorstoreMutation = useMutation({
+    mutationFn: async ({ dir_path, kb_type, model_name }: { dir_path: string; kb_type: string; model_name: string }) => {
+      const formData = new URLSearchParams();
+      formData.append("dir_path", dir_path);
+      formData.append("kb_type", kb_type);
+      formData.append("model_name", model_name);
+
+      const response = await fetch("http://localhost:8000/load-vectorstore", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString(),
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load ${kb_type} vectorstore`);
+      }
+
+      return await response.json();
+    },
+  });
+
   const chatMutation = useMutation({
     mutationFn: async ({ user_input, selected_model, has_attachments }: { user_input: string; selected_model: string; has_attachments: boolean }) => {
       // Call external API directly, exactly like file upload
@@ -167,6 +188,25 @@ export default function ChatPage() {
       } finally {
         setIsProcessingFiles(false);
       }
+    }
+
+    // Load global and company vectorstores into memory before chat
+    try {
+      await Promise.allSettled([
+        loadVectorstoreMutation.mutateAsync({
+          dir_path: "global_kb_vectorstore",
+          kb_type: "global",
+          model_name: selectedModel,
+        }),
+        loadVectorstoreMutation.mutateAsync({
+          dir_path: "company_kb_vectorstore",
+          kb_type: "company",
+          model_name: selectedModel,
+        }),
+      ]);
+    } catch (error) {
+      // Silently continue - vectorstores may not exist, which is OK
+      console.log("Vectorstore loading info:", error);
     }
 
     // Add loading message

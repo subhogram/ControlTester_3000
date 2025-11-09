@@ -114,6 +114,10 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
    - Shows green "✓ Chat Attachments Ready" toast with stats
    - Shows green "Ready" badge in upload bar
 4. User sends chat message:
+   - **Pre-chat vectorstore loading**: Frontend loads existing vectorstores into memory
+     - Calls `/load-vectorstore` for `global_kb_vectorstore` (kb_type=global)
+     - Calls `/load-vectorstore` for `company_kb_vectorstore` (kb_type=company)
+     - Uses `Promise.allSettled` for parallel loading (continues even if one fails)
    - Frontend calls `http://localhost:8000/chat` directly (no backend proxy)
    - **Loading state**: Displays spinner with "Thinking..." text
    - JSON payload:
@@ -126,7 +130,7 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
      "chat_kb_path": "chat_attachment_vectorstore"  // if has_attachments
    }
    ```
-5. External API auto-loads all available vectorstores and returns AI response
+5. External API uses loaded vectorstores and returns AI response with `loaded_paths`
 6. Frontend displays response in chat window
 7. **Auto-cleanup**: Uploaded files are automatically cleared after successful response
 
