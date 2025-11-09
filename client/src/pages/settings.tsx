@@ -30,7 +30,8 @@ interface Model {
 interface VectorstoreInfo {
   exists: boolean;
   path?: string;
-  created?: string;
+  vector_count?: number;
+  last_modified?: string;
 }
 
 export default function SettingsPage() {
@@ -47,14 +48,32 @@ export default function SettingsPage() {
     queryKey: ["/api/models"],
   });
 
-  // Check if global vectorstore exists
+  // Check if global vectorstore exists (with model for loading)
   const { data: globalVectorstore } = useQuery<VectorstoreInfo>({
-    queryKey: ["/api/vectorstore/global"],
+    queryKey: ["/api/vectorstore/global", selectedModel],
+    queryFn: async () => {
+      const url = selectedModel 
+        ? `/api/vectorstore/global?model_name=${encodeURIComponent(selectedModel)}`
+        : `/api/vectorstore/global`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("Failed to check vectorstore");
+      return response.json();
+    },
+    enabled: !!selectedModel,
   });
 
-  // Check if company vectorstore exists
+  // Check if company vectorstore exists (with model for loading)
   const { data: companyVectorstore } = useQuery<VectorstoreInfo>({
-    queryKey: ["/api/vectorstore/company"],
+    queryKey: ["/api/vectorstore/company", selectedModel],
+    queryFn: async () => {
+      const url = selectedModel 
+        ? `/api/vectorstore/company?model_name=${encodeURIComponent(selectedModel)}`
+        : `/api/vectorstore/company`;
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("Failed to check vectorstore");
+      return response.json();
+    },
+    enabled: !!selectedModel,
   });
 
   // Load vectorstore mutation
@@ -116,29 +135,8 @@ export default function SettingsPage() {
     }
   }, [models, selectedModel]);
 
-  // Auto-load global vectorstore when it exists and model is selected
-  useEffect(() => {
-    if (
-      globalVectorstore?.exists && 
-      selectedModel && 
-      !loadVectorstore.isPending &&
-      !loadedVectorstores.current.has("global")
-    ) {
-      loadVectorstore.mutate({ type: "global", modelName: selectedModel });
-    }
-  }, [globalVectorstore?.exists, selectedModel]);
-
-  // Auto-load company vectorstore when it exists and model is selected
-  useEffect(() => {
-    if (
-      companyVectorstore?.exists && 
-      selectedModel && 
-      !loadVectorstore.isPending &&
-      !loadedVectorstores.current.has("company")
-    ) {
-      loadVectorstore.mutate({ type: "company", modelName: selectedModel });
-    }
-  }, [companyVectorstore?.exists, selectedModel]);
+  // Note: Vectorstores are now auto-loaded during the check phase when model_name is provided
+  // No need for separate loading since GET /api/vectorstore/:type?model_name=X loads them
 
   const handleGeneralContextUpload = async (files: File[]) => {
     try {

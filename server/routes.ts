@@ -25,25 +25,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Check if vectorstore exists
+  // Check if vectorstore exists by attempting to load it
   app.get("/api/vectorstore/:type", async (req, res) => {
     try {
       const { type } = req.params;
-      const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
+      const { model_name } = req.query;
+      
+      const folderName = type === "global" ? "saved_global_vectorstore" : "saved_company_vectorstore";
       const vectorstorePath = path.join(process.cwd(), folderName);
       
-      const exists = fs.existsSync(vectorstorePath);
-      
-      if (exists) {
-        const stats = fs.statSync(vectorstorePath);
-        return res.json({
-          exists: true,
-          path: folderName,
-          created: stats.birthtime,
-        });
-      } else {
-        return res.json({ exists: false });
+      // Check if folder exists on disk
+      if (!fs.existsSync(vectorstorePath)) {
+        return res.json({ exists: false, path: folderName });
       }
+
+      // If model_name is provided, try to load the vectorstore
+      if (model_name) {
+        try {
+          const formData = new URLSearchParams();
+          formData.append("dir_path", folderName);
+          formData.append("kb_type", type);
+          formData.append("model_name", model_name as string);
+
+          const response = await fetch(`http://localhost:8000/load-vectorstore`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formData.toString(),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            const stats = fs.statSync(vectorstorePath);
+            return res.json({
+              exists: true,
+              path: folderName,
+              vector_count: data.ntotal || 0,
+              last_modified: stats.mtime.toISOString(),
+            });
+          }
+        } catch (loadError) {
+          console.warn("Failed to load vectorstore, but it exists on disk:", loadError);
+        }
+      }
+
+      // Fallback: just return that it exists
+      const stats = fs.statSync(vectorstorePath);
+      return res.json({
+        exists: true,
+        path: folderName,
+        last_modified: stats.mtime.toISOString(),
+      });
     } catch (error) {
       console.error("Error checking vectorstore:", error);
       return res.status(500).json({ error: "Failed to check vectorstore" });
@@ -54,7 +87,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/vectorstore/:type", async (req, res) => {
     try {
       const { type } = req.params;
-      const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
+      const folderName = type === "global" ? "saved_global_vectorstore" : "saved_company_vectorstore";
       const vectorstorePath = path.join(process.cwd(), folderName);
       
       if (fs.existsSync(vectorstorePath)) {
@@ -73,7 +106,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/vectorstore/save/:type", async (req, res) => {
     try {
       const { type } = req.params;
-      const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
+      const folderName = type === "global" ? "saved_global_vectorstore" : "saved_company_vectorstore";
 
       // Call external API to save the vectorstore using FormData
       const formData = new URLSearchParams();
@@ -111,7 +144,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ error: "model_name is required" });
       }
 
-      const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
+      const folderName = type === "global" ? "saved_global_vectorstore" : "saved_company_vectorstore";
       const vectorstorePath = path.join(process.cwd(), folderName);
 
       // Check if vectorstore exists on disk
