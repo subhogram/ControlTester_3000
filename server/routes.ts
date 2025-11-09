@@ -171,14 +171,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/chat/upload", upload.array("files"), async (req, res) => {
     try {
       const files = req.files as Express.Multer.File[];
-      const { model_name } = req.body;
+      const { selected_model, kb_type = "chat" } = req.body;
 
       if (!files || files.length === 0) {
         return res.status(400).json({ error: "No files uploaded" });
       }
 
-      if (!model_name) {
-        return res.status(400).json({ error: "model_name is required" });
+      if (!selected_model) {
+        return res.status(400).json({ error: "selected_model is required" });
       }
 
       // Create chat-attachment directory
@@ -194,20 +194,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return file.originalname;
       });
 
-      // Call external API to build knowledge base
-      const formData = new URLSearchParams();
-      formData.append("dir_path", "chat_attachments");
-      formData.append("model_name", model_name);
+      // Call external API to build knowledge base using FormData (multipart)
+      const formData = new FormData();
+      
+      // Re-attach files from memory
+      files.forEach(file => {
+        const blob = new Blob([file.buffer], { type: file.mimetype });
+        formData.append("files", blob, file.originalname);
+      });
+      
+      formData.append("selected_model", selected_model);
+      formData.append("kb_type", kb_type);
       formData.append("batch_size", "15");
       formData.append("delay_between_batches", "0.2");
       formData.append("max_retries", "3");
 
-      const response = await fetch(`http://localhost:8000/build-knowledge-api`, {
+      const response = await fetch(`http://localhost:8000/build-knowledge-base`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: formData.toString(),
+        body: formData as any,
       });
 
       if (!response.ok) {
@@ -234,33 +238,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Chat endpoint - proxy to external API
   app.post("/api/chat", async (req, res) => {
     try {
-      const { message, model_name, temperature = 0.7, has_attachments } = req.body;
+      const { user_input, selected_model, has_attachments } = req.body;
       
-      if (!message) {
-        return res.status(400).json({ error: "message is required" });
+      if (!user_input) {
+        return res.status(400).json({ error: "user_input is required" });
       }
       
-      if (!model_name) {
-        return res.status(400).json({ error: "model_name is required" });
+      if (!selected_model) {
+        return res.status(400).json({ error: "selected_model is required" });
       }
 
-      // Call external API using URLSearchParams
-      const formData = new URLSearchParams();
-      formData.append("message", message);
-      formData.append("model_name", model_name);
-      formData.append("temperature", temperature.toString());
+      // Build request payload matching Python backend ChatRequest
+      const payload: any = {
+        selected_model,
+        user_input,
+        global_kb_path: "saved_global_vectorstore",
+        company_kb_path: "saved_company_vectorstore",
+      };
       
-      // If there are attachments, indicate that chat should use the vectorstore
+      // If there are chat attachments, include the path
       if (has_attachments) {
-        formData.append("use_chat_attachments", "true");
+        payload.chat_kb_path = "chat_attachment_vectorstore";
       }
 
       const response = await fetch(`http://localhost:8000/chat`, {
         method: "POST",
         headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
+          "Content-Type": "application/json",
         },
-        body: formData.toString(),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {

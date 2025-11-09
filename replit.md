@@ -84,10 +84,13 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 
 ### External API Integration (http://localhost:8000)
 - `GET /models` - List available models
-- `POST /build-knowledge-api` - Build knowledge base from files
+- `POST /build-knowledge-base` - Build knowledge base from uploaded files
+  - Parameters: `files` (multipart), `selected_model`, `kb_type`, `batch_size`, `delay_between_batches`, `max_retries`
 - `POST /save-vectorstore` - Persist vectorstore to disk
 - `POST /load-vectorstore` - Load vectorstore into memory
 - `POST /chat` - Chat with AI using loaded vectorstores
+  - Request body (JSON): `{ selected_model, user_input, global_kb_path, company_kb_path, chat_kb_path }`
+  - Response: `{ success, response, loaded_paths }`
 
 ## Data Flow
 
@@ -97,13 +100,24 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 3. On first message send:
    - Calls `/api/chat/upload` with files
    - Backend saves files to disk
-   - Calls external `/build-knowledge-api`
+   - Re-creates FormData and forwards to external API `/build-knowledge-base`
+   - Parameters: `selected_model`, `kb_type=chat`, files
    - Creates `chat_attachment_vectorstore`
    - Shows "Processing..." badge
 4. After vectorstore built:
    - Shows green "Ready" badge
-   - Subsequent messages include `use_chat_attachments=true`
-5. Chat API uses vectorstore for context-aware responses
+   - Subsequent messages include `chat_kb_path=chat_attachment_vectorstore`
+5. Chat API payload:
+   ```json
+   {
+     "selected_model": "model_name",
+     "user_input": "user question",
+     "global_kb_path": "saved_global_vectorstore",
+     "company_kb_path": "saved_company_vectorstore",
+     "chat_kb_path": "chat_attachment_vectorstore"  // if has_attachments
+   }
+   ```
+6. Backend auto-loads all available vectorstores for context
 
 ### Vectorstore Building
 All vectorstore builds use:

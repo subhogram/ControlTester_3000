@@ -24,12 +24,13 @@ export default function ChatPage() {
   const { toast } = useToast();
 
   const uploadFilesMutation = useMutation({
-    mutationFn: async ({ files, model_name }: { files: File[]; model_name: string }) => {
+    mutationFn: async ({ files, selected_model }: { files: File[]; selected_model: string }) => {
       const formData = new FormData();
       files.forEach((file) => {
         formData.append("files", file);
       });
-      formData.append("model_name", model_name);
+      formData.append("selected_model", selected_model);
+      formData.append("kb_type", "chat");
 
       const response = await fetch("/api/chat/upload", {
         method: "POST",
@@ -46,13 +47,13 @@ export default function ChatPage() {
   });
 
   const chatMutation = useMutation({
-    mutationFn: async ({ message, model_name, has_attachments }: { message: string; model_name: string; has_attachments: boolean }) => {
+    mutationFn: async ({ user_input, selected_model, has_attachments }: { user_input: string; selected_model: string; has_attachments: boolean }) => {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ message, model_name, temperature: 0.7, has_attachments }),
+        body: JSON.stringify({ user_input, selected_model, has_attachments }),
       });
 
       if (!response.ok) {
@@ -112,7 +113,7 @@ export default function ChatPage() {
       try {
         const uploadResult = await uploadFilesMutation.mutateAsync({
           files: uploadedFiles,
-          model_name: selectedModel,
+          selected_model: selectedModel,
         });
 
         setHasAttachments(true);
@@ -135,15 +136,15 @@ export default function ChatPage() {
 
     try {
       const response = await chatMutation.mutateAsync({
-        message: content,
-        model_name: selectedModel,
+        user_input: content,
+        selected_model: selectedModel,
         has_attachments: hasAttachments,
       });
 
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content: response.response || response.message || "No response received",
+        content: response.response || "No response received",
         timestamp: new Date().toLocaleTimeString([], {
           hour: "2-digit",
           minute: "2-digit",
