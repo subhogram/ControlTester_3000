@@ -1,6 +1,7 @@
 import { Link } from "wouter";
-import { Sparkles, Settings } from "lucide-react";
+import { Sparkles, Settings, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import ThemeToggle from "./ThemeToggle";
 
 export default function ChatHeader() {
@@ -16,6 +17,13 @@ export default function ChatHeader() {
         
         <div className="flex items-center gap-2">
           <ThemeToggle />
+          <Button variant="ghost" size="icon" className="rounded-full" data-testid="button-user-profile">
+            <Avatar className="h-8 w-8">
+              <AvatarFallback className="bg-white/20 text-white border border-white/30">
+                <User className="h-4 w-4" />
+              </AvatarFallback>
+            </Avatar>
+          </Button>
           <Link href="/settings">
             <Button variant="ghost" size="icon" data-testid="button-settings">
               <Settings className="h-5 w-5 text-white" />
