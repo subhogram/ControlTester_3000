@@ -25,7 +25,7 @@ export default function ChatPage() {
 
   const uploadFilesMutation = useMutation({
     mutationFn: async ({ files, selected_model }: { files: File[]; selected_model: string }) => {
-      // Call external API directly, exactly like Settings page does
+      // Step 1: Build knowledge base (same as Settings page)
       const formData = new FormData();
       formData.append("selected_model", selected_model);
       formData.append("batch_size", "15");
@@ -49,9 +49,24 @@ export default function ChatPage() {
 
       const result = await response.json();
       
-      // Note: Chat attachments are IN-MEMORY ONLY (not saved to disk)
-      // The vectorstore exists in chat_attachment_vectorstore/ in the external API's memory
-      // This is intentional - chat attachments are temporary and session-specific
+      // Step 2: Save vectorstore to disk (chat_attachment_vectorstore folder)
+      try {
+        const saveFormData = new URLSearchParams();
+        saveFormData.append("kb_type", "chat");
+        saveFormData.append("dir_path", "chat_attachment_vectorstore");
+
+        const saveResponse = await fetch("http://localhost:8000/save-vectorstore", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: saveFormData.toString(),
+        });
+        
+        if (!saveResponse.ok) {
+          console.warn("Failed to save chat vectorstore to disk");
+        }
+      } catch (saveError) {
+        console.warn("Error saving chat vectorstore:", saveError);
+      }
       
       return result;
     },
@@ -190,20 +205,33 @@ export default function ChatPage() {
       }
     }
 
-    // Load global and company vectorstores into memory before chat
+    // Load all vectorstores into memory before chat
+    const vectorstoresToLoad = [
+      loadVectorstoreMutation.mutateAsync({
+        dir_path: "global_kb_vectorstore",
+        kb_type: "global",
+        model_name: selectedModel,
+      }),
+      loadVectorstoreMutation.mutateAsync({
+        dir_path: "company_kb_vectorstore",
+        kb_type: "company",
+        model_name: selectedModel,
+      }),
+    ];
+    
+    // If we have chat attachments, also load the chat vectorstore
+    if (currentHasAttachments) {
+      vectorstoresToLoad.push(
+        loadVectorstoreMutation.mutateAsync({
+          dir_path: "chat_attachment_vectorstore",
+          kb_type: "chat",
+          model_name: selectedModel,
+        })
+      );
+    }
+
     try {
-      await Promise.allSettled([
-        loadVectorstoreMutation.mutateAsync({
-          dir_path: "global_kb_vectorstore",
-          kb_type: "global",
-          model_name: selectedModel,
-        }),
-        loadVectorstoreMutation.mutateAsync({
-          dir_path: "company_kb_vectorstore",
-          kb_type: "company",
-          model_name: selectedModel,
-        }),
-      ]);
+      await Promise.allSettled(vectorstoresToLoad);
     } catch (error) {
       // Silently continue - vectorstores may not exist, which is OK
       console.log("Vectorstore loading info:", error);

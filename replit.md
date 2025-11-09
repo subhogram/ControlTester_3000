@@ -106,17 +106,22 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 ### Chat with Attachments
 1. User uploads files in chat window
 2. On first message send:
-   - Frontend calls `http://localhost:8000/build-knowledge-base` directly
-   - FormData parameters: `selected_model`, `kb_type=chat`, `batch_size=15`, `delay_between_batches=0.2`, `max_retries=3`, files
-   - Creates `chat_attachment_vectorstore/` automatically (in-memory only)
-   - Shows "Processing..." badge
-3. After vectorstore built:
+   - **Step 1: Build vectorstore**
+     - Frontend calls `http://localhost:8000/build-knowledge-base` directly
+     - FormData parameters: `selected_model`, `kb_type=chat`, `batch_size=15`, `delay_between_batches=0.2`, `max_retries=3`, files
+     - Creates vectorstore in memory
+   - **Step 2: Save to disk**
+     - Frontend calls `http://localhost:8000/save-vectorstore`
+     - Saves to `chat_attachment_vectorstore/` folder
+   - Shows "Processing..." badge during both steps
+3. After vectorstore built and saved:
    - Shows green "✓ Chat Attachments Ready" toast with stats
    - Shows green "Ready" badge in upload bar
 4. User sends chat message:
-   - **Pre-chat vectorstore loading**: Frontend loads existing vectorstores into memory
+   - **Pre-chat vectorstore loading**: Frontend loads ALL vectorstores into memory
      - Calls `/load-vectorstore` for `global_kb_vectorstore` (kb_type=global)
      - Calls `/load-vectorstore` for `company_kb_vectorstore` (kb_type=company)
+     - Calls `/load-vectorstore` for `chat_attachment_vectorstore` (kb_type=chat) **if attachments exist**
      - Uses `Promise.allSettled` for parallel loading (continues even if one fails)
    - Frontend calls `http://localhost:8000/chat` directly (no backend proxy)
    - **Loading state**: Displays spinner with "Thinking..." text
