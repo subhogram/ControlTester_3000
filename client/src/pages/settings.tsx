@@ -119,6 +119,19 @@ export default function SettingsPage() {
 
       const result = await response.json();
       
+      // Save the vectorstore to disk
+      try {
+        const saveResponse = await fetch("/api/vectorstore/save/global", {
+          method: "POST",
+        });
+        
+        if (!saveResponse.ok) {
+          console.warn("Failed to save vectorstore to disk");
+        }
+      } catch (saveError) {
+        console.warn("Error saving vectorstore:", saveError);
+      }
+      
       const newFiles = files.map((file) => ({
         id: `${Date.now()}-${Math.random()}`,
         filename: file.name,
@@ -169,6 +182,19 @@ export default function SettingsPage() {
       }
 
       const result = await response.json();
+      
+      // Save the vectorstore to disk
+      try {
+        const saveResponse = await fetch("/api/vectorstore/save/company", {
+          method: "POST",
+        });
+        
+        if (!saveResponse.ok) {
+          console.warn("Failed to save vectorstore to disk");
+        }
+      } catch (saveError) {
+        console.warn("Error saving vectorstore:", saveError);
+      }
       
       const newFiles = files.map((file) => ({
         id: `${Date.now()}-${Math.random()}`,

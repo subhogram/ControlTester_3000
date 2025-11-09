@@ -69,6 +69,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Save vectorstore to disk
+  app.post("/api/vectorstore/save/:type", async (req, res) => {
+    try {
+      const { type } = req.params;
+      const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
+
+      // Call external API to save the vectorstore using FormData
+      const formData = new URLSearchParams();
+      formData.append("dir_path", folderName);
+      formData.append("kb_type", type);
+
+      const response = await fetch(`http://localhost:8000/save-vectorstore`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString(),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to save vectorstore: ${errorText}`);
+      }
+
+      const result = await response.json();
+      return res.json({ success: true, path: folderName, ...result });
+    } catch (error) {
+      console.error("Error saving vectorstore:", error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Failed to save vectorstore" });
+    }
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;
