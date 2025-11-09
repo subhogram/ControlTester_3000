@@ -42,15 +42,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // If model_name is provided, try to load the vectorstore
       if (model_name) {
         try {
-          const FormData = (await import("form-data")).default;
-          const formData = new FormData();
+          const formData = new URLSearchParams();
           formData.append("dir_path", folderName);
           formData.append("kb_type", type);
           formData.append("model_name", model_name as string);
 
           const response = await fetch(`http://localhost:8000/load-vectorstore`, {
             method: "POST",
-            body: formData as any,
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formData.toString(),
           });
 
           if (response.ok) {
@@ -91,15 +93,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { type } = req.params;
       const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
 
-      // Call external API to save the vectorstore using FormData
-      const FormData = (await import("form-data")).default;
-      const formData = new FormData();
+      // Call external API to save the vectorstore using URLSearchParams
+      const formData = new URLSearchParams();
       formData.append("dir_path", folderName);
       formData.append("kb_type", type);
 
       const response = await fetch(`http://localhost:8000/save-vectorstore`, {
         method: "POST",
-        body: formData as any,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString(),
       });
 
       if (!response.ok) {
@@ -133,16 +137,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Vectorstore not found on disk" });
       }
 
-      // Call external API to load the vectorstore using FormData
-      const FormData = (await import("form-data")).default;
-      const formData = new FormData();
+      // Call external API to load the vectorstore using URLSearchParams
+      const formData = new URLSearchParams();
       formData.append("dir_path", folderName);
       formData.append("kb_type", type);
       formData.append("model_name", model_name);
 
       const response = await fetch(`http://localhost:8000/load-vectorstore`, {
         method: "POST",
-        body: formData as any,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString(),
       });
 
       if (!response.ok) {
