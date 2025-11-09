@@ -58,12 +58,25 @@ export default function ChatPage() {
 
   const chatMutation = useMutation({
     mutationFn: async ({ user_input, selected_model, has_attachments }: { user_input: string; selected_model: string; has_attachments: boolean }) => {
-      const response = await fetch("/api/chat", {
+      // Call external API directly, exactly like file upload
+      const payload: any = {
+        selected_model,
+        user_input,
+        global_kb_path: "saved_global_vectorstore",
+        company_kb_path: "saved_company_vectorstore",
+      };
+      
+      // If there are chat attachments, include the path
+      if (has_attachments) {
+        payload.chat_kb_path = "chat_attachment_vectorstore";
+      }
+
+      const response = await fetch("http://localhost:8000/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ user_input, selected_model, has_attachments }),
+        body: JSON.stringify(payload),
       });
 
       if (!response.ok) {

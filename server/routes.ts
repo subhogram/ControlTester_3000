@@ -168,56 +168,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
 
-  // Chat endpoint - proxy to external API
-  app.post("/api/chat", async (req, res) => {
-    try {
-      const { user_input, selected_model, has_attachments } = req.body;
-      
-      if (!user_input) {
-        return res.status(400).json({ error: "user_input is required" });
-      }
-      
-      if (!selected_model) {
-        return res.status(400).json({ error: "selected_model is required" });
-      }
-
-      // Build request payload matching Python backend ChatRequest
-      const payload: any = {
-        selected_model,
-        user_input,
-        global_kb_path: "saved_global_vectorstore",
-        company_kb_path: "saved_company_vectorstore",
-      };
-      
-      // If there are chat attachments, include the path
-      if (has_attachments) {
-        payload.chat_kb_path = "chat_attachment_vectorstore";
-      }
-
-      const response = await fetch(`http://localhost:8000/chat`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Chat API error: ${errorText}`);
-      }
-
-      const result = await response.json();
-      return res.json(result);
-    } catch (error) {
-      console.error("Error in chat:", error);
-      return res.status(500).json({ 
-        error: error instanceof Error ? error.message : "Failed to get chat response",
-        fallback: true 
-      });
-    }
-  });
-
   const httpServer = createServer(app);
 
   return httpServer;

@@ -79,7 +79,6 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 - `GET /api/vectorstore/:type` - Check vectorstore status
 - `POST /api/vectorstore/save/:type` - Save vectorstore to disk
 - `POST /api/vectorstore/load/:type` - Load vectorstore into memory
-- `POST /api/chat` - Send chat message (proxies to external API)
 
 ### External API Integration (http://localhost:8000)
 - `GET /models` - List available models
@@ -103,16 +102,9 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 3. After vectorstore built:
    - Shows green "✓ Chat Attachments Ready" toast with stats
    - Shows green "Ready" badge in upload bar
-   - Subsequent messages include `chat_kb_path=chat_attachment_vectorstore`
-4. Chat API payload (sent to backend):
-   ```json
-   {
-     "user_input": "user question",
-     "selected_model": "model_name",
-     "has_attachments": true  // triggers chat_kb_path inclusion
-   }
-   ```
-5. Backend forwards to external API:
+4. User sends chat message:
+   - Frontend calls `http://localhost:8000/chat` directly (no backend proxy)
+   - JSON payload:
    ```json
    {
      "selected_model": "model_name",
@@ -122,7 +114,8 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
      "chat_kb_path": "chat_attachment_vectorstore"  // if has_attachments
    }
    ```
-6. External API auto-loads all available vectorstores for context
+5. External API auto-loads all available vectorstores and returns AI response
+6. Frontend displays response in chat window
 
 ### Vectorstore Building
 All vectorstore builds use:
@@ -132,16 +125,15 @@ All vectorstore builds use:
 
 ## Recent Changes (November 9, 2025)
 
-### File Upload to Chat Integration
-- ✅ Added file upload support to chat window
-- ✅ Integrated `/build-knowledge-api` for chat attachments
-- ✅ Created chat-attachment vectorstore functionality
-- ✅ Added visual indicators (Processing/Ready badges)
-- ✅ Pass `use_chat_attachments` flag to chat API
+### Direct External API Integration
+- ✅ **File uploads**: Frontend calls `http://localhost:8000/build-knowledge-base` directly
+- ✅ **Chat messages**: Frontend calls `http://localhost:8000/chat` directly
+- ✅ **No backend proxy**: All external API calls happen from frontend (like Settings page)
+- ✅ **Consistent pattern**: Chat upload matches Settings page implementation exactly
+- ✅ Visual indicators: Processing/Ready badges with detailed stats
 
 ### Previous Features
 - ✅ Removed delete vectorstore functionality
-- ✅ Replaced FormData with URLSearchParams for API communication
 - ✅ Implemented vectorstore auto-save to disk
 - ✅ Created check endpoint with load-vectorstore API integration
 - ✅ Added auto-loading functionality on Settings page
