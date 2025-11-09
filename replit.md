@@ -75,19 +75,30 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 ## API Endpoints
 
 ### Internal Endpoints (Express)
-- `GET /api/models` - Fetch available models
-- `GET /api/vectorstore/:type` - Check vectorstore status
-- `POST /api/vectorstore/save/:type` - Save vectorstore to disk
-- `POST /api/vectorstore/load/:type` - Load vectorstore into memory
+- `GET /api/models` - Fetch available models (transforms format for frontend)
 
 ### External API Integration (http://localhost:8000)
+**All external API calls made directly from frontend:**
+
 - `GET /models` - List available models
 - `POST /build-knowledge-base` - Build knowledge base from uploaded files
-  - Parameters: `files` (multipart), `selected_model`, `kb_type`, `batch_size`, `delay_between_batches`, `max_retries`
+  - Method: FormData (multipart)
+  - Parameters: `files`, `selected_model`, `kb_type`, `batch_size`, `delay_between_batches`, `max_retries`
+  - Response: `{ success, processing_summary, vector_count, ... }`
+  
 - `POST /save-vectorstore` - Persist vectorstore to disk
-- `POST /load-vectorstore` - Load vectorstore into memory
+  - Method: URLSearchParams (form-urlencoded)
+  - Parameters: `kb_type`, `dir_path`
+  - Response: `{ success, ... }`
+  
+- `POST /load-vectorstore` - Load vectorstore from disk into memory
+  - Method: URLSearchParams (form-urlencoded)
+  - Parameters: `dir_path`, `kb_type`, `model_name`
+  - Response: `{ success, ntotal, ... }`
+  
 - `POST /chat` - Chat with AI using loaded vectorstores
-  - Request body (JSON): `{ selected_model, user_input, global_kb_path, company_kb_path, chat_kb_path }`
+  - Method: JSON
+  - Request body: `{ selected_model, user_input, global_kb_path, company_kb_path, chat_kb_path }`
   - Response: `{ success, response, loaded_paths }`
 
 ## Data Flow
@@ -117,19 +128,33 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 5. External API auto-loads all available vectorstores and returns AI response
 6. Frontend displays response in chat window
 
-### Vectorstore Building
-All vectorstore builds use:
-- `batch_size`: 15
-- `delay_between_batches`: 0.2
-- `max_retries`: 3
+### Vectorstore Management
+**All operations call external API directly from frontend:**
+
+1. **Build Vectorstore** (Settings & Chat)
+   - API: `POST http://localhost:8000/build-knowledge-base`
+   - Parameters: `batch_size=15`, `delay_between_batches=0.2`, `max_retries=3`
+   - Creates vectorstore folders automatically
+
+2. **Save Vectorstore** (Settings)
+   - API: `POST http://localhost:8000/save-vectorstore`
+   - Saves to: `global_kb_vectorstore/` or `company_kb_vectorstore/`
+
+3. **Load Vectorstore** (Settings - Auto-load on model selection)
+   - API: `POST http://localhost:8000/load-vectorstore`
+   - Loads from saved folders into memory
+   - Returns vector count for status badge
 
 ## Recent Changes (November 9, 2025)
 
-### Direct External API Integration
-- ✅ **File uploads**: Frontend calls `http://localhost:8000/build-knowledge-base` directly
-- ✅ **Chat messages**: Frontend calls `http://localhost:8000/chat` directly
-- ✅ **No backend proxy**: All external API calls happen from frontend (like Settings page)
-- ✅ **Consistent pattern**: Chat upload matches Settings page implementation exactly
+### Complete Direct External API Integration
+- ✅ **File uploads**: Frontend → `POST http://localhost:8000/build-knowledge-base`
+- ✅ **Chat messages**: Frontend → `POST http://localhost:8000/chat`
+- ✅ **Save vectorstore**: Frontend → `POST http://localhost:8000/save-vectorstore`
+- ✅ **Load vectorstore**: Frontend → `POST http://localhost:8000/load-vectorstore`
+- ✅ **Check vectorstore**: Frontend → `POST http://localhost:8000/load-vectorstore` (auto-loads)
+- ✅ **Backend simplified**: Only `/api/models` remains (format transformer)
+- ✅ **Consistent pattern**: All features use direct external API calls
 - ✅ Visual indicators: Processing/Ready badges with detailed stats
 
 ### Previous Features

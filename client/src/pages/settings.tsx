@@ -50,28 +50,70 @@ export default function SettingsPage() {
 
   // Check if global vectorstore exists (with model for loading)
   const { data: globalVectorstore } = useQuery<VectorstoreInfo>({
-    queryKey: ["/api/vectorstore/global", selectedModel],
+    queryKey: ["vectorstore/global", selectedModel],
     queryFn: async () => {
-      const url = selectedModel 
-        ? `/api/vectorstore/global?model_name=${encodeURIComponent(selectedModel)}`
-        : `/api/vectorstore/global`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Failed to check vectorstore");
-      return response.json();
+      if (!selectedModel) return { exists: false, path: "global_kb_vectorstore", vector_count: 0 };
+      
+      // Call external API directly to load vectorstore
+      const formData = new URLSearchParams();
+      formData.append("dir_path", "global_kb_vectorstore");
+      formData.append("kb_type", "global");
+      formData.append("model_name", selectedModel);
+
+      const response = await fetch("http://localhost:8000/load-vectorstore", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString(),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.success) {
+          return {
+            exists: true,
+            path: "global_kb_vectorstore",
+            vector_count: data.ntotal ?? data.vector_count ?? 0,
+            last_modified: new Date().toISOString(),
+          };
+        }
+      }
+      
+      return { exists: false, path: "global_kb_vectorstore", vector_count: 0 };
     },
     enabled: !!selectedModel,
   });
 
   // Check if company vectorstore exists (with model for loading)
   const { data: companyVectorstore } = useQuery<VectorstoreInfo>({
-    queryKey: ["/api/vectorstore/company", selectedModel],
+    queryKey: ["vectorstore/company", selectedModel],
     queryFn: async () => {
-      const url = selectedModel 
-        ? `/api/vectorstore/company?model_name=${encodeURIComponent(selectedModel)}`
-        : `/api/vectorstore/company`;
-      const response = await fetch(url);
-      if (!response.ok) throw new Error("Failed to check vectorstore");
-      return response.json();
+      if (!selectedModel) return { exists: false, path: "company_kb_vectorstore", vector_count: 0 };
+      
+      // Call external API directly to load vectorstore
+      const formData = new URLSearchParams();
+      formData.append("dir_path", "company_kb_vectorstore");
+      formData.append("kb_type", "company");
+      formData.append("model_name", selectedModel);
+
+      const response = await fetch("http://localhost:8000/load-vectorstore", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString(),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.success) {
+          return {
+            exists: true,
+            path: "company_kb_vectorstore",
+            vector_count: data.ntotal ?? data.vector_count ?? 0,
+            last_modified: new Date().toISOString(),
+          };
+        }
+      }
+      
+      return { exists: false, path: "company_kb_vectorstore", vector_count: 0 };
     },
     enabled: !!selectedModel,
   });
@@ -146,10 +188,16 @@ export default function SettingsPage() {
 
       const result = await response.json();
       
-      // Save the vectorstore to disk
+      // Save the vectorstore to disk - call external API directly
       try {
-        const saveResponse = await fetch("/api/vectorstore/save/global", {
+        const formData = new URLSearchParams();
+        formData.append("kb_type", "global");
+        formData.append("dir_path", "global_kb_vectorstore");
+
+        const saveResponse = await fetch("http://localhost:8000/save-vectorstore", {
           method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: formData.toString(),
         });
         
         if (!saveResponse.ok) {
@@ -167,7 +215,7 @@ export default function SettingsPage() {
       setGeneralContextFiles((prev) => [...prev, ...newFiles]);
 
       // Refresh vectorstore info after upload
-      queryClient.invalidateQueries({ queryKey: ["/api/vectorstore/global"] });
+      queryClient.invalidateQueries({ queryKey: ["vectorstore/global"] });
 
       return result;
     } catch (error) {
@@ -210,10 +258,16 @@ export default function SettingsPage() {
 
       const result = await response.json();
       
-      // Save the vectorstore to disk
+      // Save the vectorstore to disk - call external API directly
       try {
-        const saveResponse = await fetch("/api/vectorstore/save/company", {
+        const formData = new URLSearchParams();
+        formData.append("kb_type", "company");
+        formData.append("dir_path", "company_kb_vectorstore");
+
+        const saveResponse = await fetch("http://localhost:8000/save-vectorstore", {
           method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: formData.toString(),
         });
         
         if (!saveResponse.ok) {
@@ -231,7 +285,7 @@ export default function SettingsPage() {
       setCompanyPolicyFiles((prev) => [...prev, ...newFiles]);
 
       // Refresh vectorstore info after upload
-      queryClient.invalidateQueries({ queryKey: ["/api/vectorstore/company"] });
+      queryClient.invalidateQueries({ queryKey: ["vectorstore/company"] });
 
       return result;
     } catch (error) {
