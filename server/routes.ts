@@ -164,6 +164,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Chat endpoint - proxy to external API
+  app.post("/api/chat", async (req, res) => {
+    try {
+      const { message, model_name, temperature = 0.7 } = req.body;
+      
+      if (!message) {
+        return res.status(400).json({ error: "message is required" });
+      }
+      
+      if (!model_name) {
+        return res.status(400).json({ error: "model_name is required" });
+      }
+
+      // Call external API using URLSearchParams
+      const formData = new URLSearchParams();
+      formData.append("message", message);
+      formData.append("model_name", model_name);
+      formData.append("temperature", temperature.toString());
+
+      const response = await fetch(`http://localhost:8000/chat`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString(),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Chat API error: ${errorText}`);
+      }
+
+      const result = await response.json();
+      return res.json(result);
+    } catch (error) {
+      console.error("Error in chat:", error);
+      return res.status(500).json({ 
+        error: error instanceof Error ? error.message : "Failed to get chat response",
+        fallback: true 
+      });
+    }
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;
