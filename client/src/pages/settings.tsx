@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { ArrowLeft, Trash2 } from "lucide-react";
+import { ArrowLeft, Trash2, CheckCircle2 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import ContextFileUpload from "@/components/ContextFileUpload";
@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 
@@ -273,11 +274,23 @@ export default function SettingsPage() {
             <CardHeader>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex-1">
-                  <CardTitle>General Context</CardTitle>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <CardTitle>General Context</CardTitle>
+                    {globalVectorstore?.exists && (
+                      <Badge 
+                        variant="default" 
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                        data-testid="badge-global-vectorstore-ready"
+                      >
+                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                        Vectorstore Ready
+                      </Badge>
+                    )}
+                  </div>
                   {globalVectorstore?.exists && (
                     <CardDescription className="mt-2">
                       <span className="text-xs">
-                        📁 Vectorstore: <code className="bg-muted px-1 py-0.5 rounded">{globalVectorstore.path}</code>
+                        📁 Path: <code className="bg-muted px-1 py-0.5 rounded">{globalVectorstore.path}</code>
                       </span>
                     </CardDescription>
                   )}
@@ -313,11 +326,23 @@ export default function SettingsPage() {
             <CardHeader>
               <div className="flex items-center justify-between gap-2">
                 <div className="flex-1">
-                  <CardTitle>Company Policy Context</CardTitle>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <CardTitle>Company Policy Context</CardTitle>
+                    {companyVectorstore?.exists && (
+                      <Badge 
+                        variant="default" 
+                        className="bg-green-600 hover:bg-green-700 text-white"
+                        data-testid="badge-company-vectorstore-ready"
+                      >
+                        <CheckCircle2 className="h-3 w-3 mr-1" />
+                        Vectorstore Ready
+                      </Badge>
+                    )}
+                  </div>
                   {companyVectorstore?.exists && (
                     <CardDescription className="mt-2">
                       <span className="text-xs">
-                        📁 Vectorstore: <code className="bg-muted px-1 py-0.5 rounded">{companyVectorstore.path}</code>
+                        📁 Path: <code className="bg-muted px-1 py-0.5 rounded">{companyVectorstore.path}</code>
                       </span>
                     </CardDescription>
                   )}
