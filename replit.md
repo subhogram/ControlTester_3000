@@ -79,8 +79,7 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 - `GET /api/vectorstore/:type` - Check vectorstore status
 - `POST /api/vectorstore/save/:type` - Save vectorstore to disk
 - `POST /api/vectorstore/load/:type` - Load vectorstore into memory
-- `POST /api/chat/upload` - Upload files for chat attachments
-- `POST /api/chat` - Send chat message
+- `POST /api/chat` - Send chat message (proxies to external API)
 
 ### External API Integration (http://localhost:8000)
 - `GET /models` - List available models
@@ -96,18 +95,24 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 
 ### Chat with Attachments
 1. User uploads files in chat window
-2. Files stored in `chat_attachments/` folder
-3. On first message send:
-   - Calls `/api/chat/upload` with files
-   - Backend saves files to disk
-   - Re-creates FormData and forwards to external API `/build-knowledge-base`
-   - Parameters: `selected_model`, `kb_type=chat`, files
-   - Creates `chat_attachment_vectorstore`
+2. On first message send:
+   - Frontend calls `http://localhost:8000/build-knowledge-base` directly
+   - FormData parameters: `selected_model`, `kb_type=chat`, `batch_size=15`, `delay_between_batches=0.2`, `max_retries=3`, files
+   - Creates `chat_attachment_vectorstore/` automatically
    - Shows "Processing..." badge
-4. After vectorstore built:
-   - Shows green "Ready" badge
+3. After vectorstore built:
+   - Shows green "✓ Chat Attachments Ready" toast with stats
+   - Shows green "Ready" badge in upload bar
    - Subsequent messages include `chat_kb_path=chat_attachment_vectorstore`
-5. Chat API payload:
+4. Chat API payload (sent to backend):
+   ```json
+   {
+     "user_input": "user question",
+     "selected_model": "model_name",
+     "has_attachments": true  // triggers chat_kb_path inclusion
+   }
+   ```
+5. Backend forwards to external API:
    ```json
    {
      "selected_model": "model_name",
@@ -117,7 +122,7 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
      "chat_kb_path": "chat_attachment_vectorstore"  // if has_attachments
    }
    ```
-6. Backend auto-loads all available vectorstores for context
+6. External API auto-loads all available vectorstores for context
 
 ### Vectorstore Building
 All vectorstore builds use:

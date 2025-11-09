@@ -25,24 +25,34 @@ export default function ChatPage() {
 
   const uploadFilesMutation = useMutation({
     mutationFn: async ({ files, selected_model }: { files: File[]; selected_model: string }) => {
+      // Call external API directly, exactly like Settings page does
       const formData = new FormData();
+      formData.append("selected_model", selected_model);
+      formData.append("batch_size", "15");
+      formData.append("delay_between_batches", "0.2");
+      formData.append("max_retries", "3");
+      formData.append("kb_type", "chat");
+
       files.forEach((file) => {
         formData.append("files", file);
       });
-      formData.append("selected_model", selected_model);
-      formData.append("kb_type", "chat");
 
-      const response = await fetch("/api/chat/upload", {
+      const response = await fetch("http://localhost:8000/build-knowledge-base", {
         method: "POST",
         body: formData,
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to upload files");
+        const error = await response.json();
+        throw new Error(error.detail || "Failed to build knowledge base");
       }
 
-      return await response.json();
+      const result = await response.json();
+      
+      // Note: Chat attachments don't need to be saved to disk as they're temporary
+      // The vectorstore is stored in chat_attachment_vectorstore/ automatically
+      
+      return result;
     },
   });
 
@@ -117,9 +127,16 @@ export default function ChatPage() {
         });
 
         setHasAttachments(true);
+        
+        const stats = uploadResult?.processing_summary;
+        const statsMessage = stats 
+          ? `Files: ${stats.files} | Vectors: ${stats.vectors || 'N/A'} | Time: ${stats.processing_seconds?.toFixed(2)}s | Model: ${stats.model}`
+          : `Successfully uploaded files`;
+        
         toast({
-          title: "Files Processed",
-          description: `${uploadResult.files.length} file(s) processed and vectorstore created.`,
+          title: "✓ Chat Attachments Ready",
+          description: statsMessage,
+          className: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
         });
       } catch (error) {
         toast({
