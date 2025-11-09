@@ -1,8 +1,6 @@
-saved_company_vectorstore/
-saved_kb_vectorstore/
-THINGS_TODO.txt
-.venv/
-.streamlit/
-utils/__pycache__/
-audit_pipeline.log
-.vscode/
+node_modules
+dist
+.DS_Store
+server/public
+vite.config.ts.*
+*.tar.gz
