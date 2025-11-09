@@ -19,16 +19,40 @@ export default function ChatPage() {
   const [, setLocation] = useLocation();
   const [messages, setMessages] = useState<Message[]>([]);
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [hasAttachments, setHasAttachments] = useState(false);
+  const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const { toast } = useToast();
 
+  const uploadFilesMutation = useMutation({
+    mutationFn: async ({ files, model_name }: { files: File[]; model_name: string }) => {
+      const formData = new FormData();
+      files.forEach((file) => {
+        formData.append("files", file);
+      });
+      formData.append("model_name", model_name);
+
+      const response = await fetch("/api/chat/upload", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to upload files");
+      }
+
+      return await response.json();
+    },
+  });
+
   const chatMutation = useMutation({
-    mutationFn: async ({ message, model_name }: { message: string; model_name: string }) => {
+    mutationFn: async ({ message, model_name, has_attachments }: { message: string; model_name: string; has_attachments: boolean }) => {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ message, model_name, temperature: 0.7 }),
+        body: JSON.stringify({ message, model_name, temperature: 0.7, has_attachments }),
       });
 
       if (!response.ok) {
@@ -82,10 +106,38 @@ export default function ChatPage() {
       return;
     }
 
+    // Process uploaded files if any
+    if (uploadedFiles.length > 0 && !hasAttachments) {
+      setIsProcessingFiles(true);
+      try {
+        const uploadResult = await uploadFilesMutation.mutateAsync({
+          files: uploadedFiles,
+          model_name: selectedModel,
+        });
+
+        setHasAttachments(true);
+        toast({
+          title: "Files Processed",
+          description: `${uploadResult.files.length} file(s) processed and vectorstore created.`,
+        });
+      } catch (error) {
+        toast({
+          title: "File Upload Failed",
+          description: error instanceof Error ? error.message : "Failed to process files",
+          variant: "destructive",
+        });
+        setIsProcessingFiles(false);
+        return;
+      } finally {
+        setIsProcessingFiles(false);
+      }
+    }
+
     try {
       const response = await chatMutation.mutateAsync({
         message: content,
         model_name: selectedModel,
+        has_attachments: hasAttachments,
       });
 
       const aiMessage: Message = {
@@ -135,10 +187,18 @@ export default function ChatPage() {
 
       <FileUploadBar
         files={uploadedFiles}
-        onRemoveFile={(index) =>
-          setUploadedFiles((prev) => prev.filter((_, i) => i !== index))
-        }
-        onClearAll={() => setUploadedFiles([])}
+        onRemoveFile={(index) => {
+          setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+          if (uploadedFiles.length === 1) {
+            setHasAttachments(false);
+          }
+        }}
+        onClearAll={() => {
+          setUploadedFiles([]);
+          setHasAttachments(false);
+        }}
+        isProcessing={isProcessingFiles}
+        hasVectorstore={hasAttachments}
       />
 
       <ChatInput
@@ -146,7 +206,7 @@ export default function ChatPage() {
         onFileSelect={(files) =>
           setUploadedFiles((prev) => [...prev, ...files])
         }
-        disabled={chatMutation.isPending}
+        disabled={chatMutation.isPending || isProcessingFiles}
       />
 
       <FileActionsPanel

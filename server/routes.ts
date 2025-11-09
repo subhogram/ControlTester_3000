@@ -3,6 +3,9 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import fs from "fs";
 import path from "path";
+import multer from "multer";
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/models", async (req, res) => {
@@ -164,10 +167,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Upload files for chat and build chat-attachment vectorstore
+  app.post("/api/chat/upload", upload.array("files"), async (req, res) => {
+    try {
+      const files = req.files as Express.Multer.File[];
+      const { model_name } = req.body;
+
+      if (!files || files.length === 0) {
+        return res.status(400).json({ error: "No files uploaded" });
+      }
+
+      if (!model_name) {
+        return res.status(400).json({ error: "model_name is required" });
+      }
+
+      // Create chat-attachment directory
+      const chatAttachmentDir = path.join(process.cwd(), "chat_attachments");
+      if (!fs.existsSync(chatAttachmentDir)) {
+        fs.mkdirSync(chatAttachmentDir, { recursive: true });
+      }
+
+      // Save uploaded files
+      const savedFiles = files.map(file => {
+        const filePath = path.join(chatAttachmentDir, file.originalname);
+        fs.writeFileSync(filePath, file.buffer);
+        return file.originalname;
+      });
+
+      // Call external API to build knowledge base
+      const formData = new URLSearchParams();
+      formData.append("dir_path", "chat_attachments");
+      formData.append("model_name", model_name);
+      formData.append("batch_size", "15");
+      formData.append("delay_between_batches", "0.2");
+      formData.append("max_retries", "3");
+
+      const response = await fetch(`http://localhost:8000/build-knowledge-api`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString(),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to build knowledge base: ${errorText}`);
+      }
+
+      const result = await response.json();
+      
+      return res.json({
+        success: true,
+        files: savedFiles,
+        vectorstore_path: "chat_attachment_vectorstore",
+        ...result,
+      });
+    } catch (error) {
+      console.error("Error uploading chat files:", error);
+      return res.status(500).json({
+        error: error instanceof Error ? error.message : "Failed to upload files",
+      });
+    }
+  });
+
   // Chat endpoint - proxy to external API
   app.post("/api/chat", async (req, res) => {
     try {
-      const { message, model_name, temperature = 0.7 } = req.body;
+      const { message, model_name, temperature = 0.7, has_attachments } = req.body;
       
       if (!message) {
         return res.status(400).json({ error: "message is required" });
@@ -182,6 +249,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       formData.append("message", message);
       formData.append("model_name", model_name);
       formData.append("temperature", temperature.toString());
+      
+      // If there are attachments, indicate that chat should use the vectorstore
+      if (has_attachments) {
+        formData.append("use_chat_attachments", "true");
+      }
 
       const response = await fetch(`http://localhost:8000/chat`, {
         method: "POST",
