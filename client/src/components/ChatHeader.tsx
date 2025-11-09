@@ -13,12 +13,14 @@ interface ChatHeaderProps {
   onSettingsClick: () => void;
   onLogout: () => void;
   onClearChat: () => void;
+  hasMessages: boolean;
 }
 
 export default function ChatHeader({
   onSettingsClick,
   onLogout,
   onClearChat,
+  hasMessages,
 }: ChatHeaderProps) {
   const { theme, toggleTheme } = useTheme();
 
@@ -34,14 +36,16 @@ export default function ChatHeader({
       </div>
 
       <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={onClearChat}
-          data-testid="button-clear-chat"
-        >
-          <Trash2 className="h-5 w-5" />
-        </Button>
+        {hasMessages && (
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onClearChat}
+            data-testid="button-clear-chat"
+          >
+            <Trash2 className="h-5 w-5" />
+          </Button>
+        )}
 
         <Button
           variant="ghost"

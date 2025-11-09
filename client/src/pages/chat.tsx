@@ -242,6 +242,7 @@ export default function ChatPage() {
         onSettingsClick={() => setLocation("/settings")}
         onLogout={handleLogout}
         onClearChat={handleClearChat}
+        hasMessages={messages.length > 0}
       />
 
       <ChatMessages messages={messages} />
