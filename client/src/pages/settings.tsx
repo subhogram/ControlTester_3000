@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
-import { ArrowLeft } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft, Trash2 } from "lucide-react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import ContextFileUpload from "@/components/ContextFileUpload";
 import {
@@ -12,6 +12,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useToast } from "@/hooks/use-toast";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 
 interface ContextFile {
   id: string;
@@ -24,6 +26,12 @@ interface Model {
   label: string;
 }
 
+interface VectorstoreInfo {
+  exists: boolean;
+  path?: string;
+  created?: string;
+}
+
 export default function SettingsPage() {
   const [, setLocation] = useLocation();
   const [generalContextFiles, setGeneralContextFiles] = useState<ContextFile[]>([]);
@@ -31,9 +39,42 @@ export default function SettingsPage() {
   const [selectedModel, setSelectedModel] = useState(() => {
     return localStorage.getItem("selectedModel") || "";
   });
+  const { toast } = useToast();
 
   const { data: models, isLoading: modelsLoading, error: modelsError } = useQuery<Model[]>({
     queryKey: ["/api/models"],
+  });
+
+  // Check if global vectorstore exists
+  const { data: globalVectorstore } = useQuery<VectorstoreInfo>({
+    queryKey: ["/api/vectorstore/global"],
+  });
+
+  // Check if company vectorstore exists
+  const { data: companyVectorstore } = useQuery<VectorstoreInfo>({
+    queryKey: ["/api/vectorstore/company"],
+  });
+
+  // Delete vectorstore mutation
+  const deleteVectorstore = useMutation({
+    mutationFn: async (type: string) => {
+      return await apiRequest("DELETE", `/api/vectorstore/${type}`);
+    },
+    onSuccess: (_, type) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/vectorstore/${type}`] });
+      toast({
+        title: "✓ Deleted Successfully",
+        description: `${type === "global" ? "General Context" : "Company Policy"} vectorstore has been deleted`,
+        className: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "✗ Delete Failed",
+        description: error instanceof Error ? error.message : "Failed to delete vectorstore",
+        variant: "destructive",
+      });
+    },
   });
 
   useEffect(() => {
@@ -85,6 +126,9 @@ export default function SettingsPage() {
       }));
       setGeneralContextFiles((prev) => [...prev, ...newFiles]);
 
+      // Refresh vectorstore info after upload
+      queryClient.invalidateQueries({ queryKey: ["/api/vectorstore/global"] });
+
       return result;
     } catch (error) {
       console.error("Error uploading files:", error);
@@ -132,6 +176,9 @@ export default function SettingsPage() {
         uploadedAt: "Just now",
       }));
       setCompanyPolicyFiles((prev) => [...prev, ...newFiles]);
+
+      // Refresh vectorstore info after upload
+      queryClient.invalidateQueries({ queryKey: ["/api/vectorstore/company"] });
 
       return result;
     } catch (error) {
@@ -197,7 +244,32 @@ export default function SettingsPage() {
           </Card>
 
           <Card>
-            <CardContent className="pt-6">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex-1">
+                  <CardTitle>General Context</CardTitle>
+                  {globalVectorstore?.exists && (
+                    <CardDescription className="mt-2">
+                      <span className="text-xs">
+                        📁 Vectorstore: <code className="bg-muted px-1 py-0.5 rounded">{globalVectorstore.path}</code>
+                      </span>
+                    </CardDescription>
+                  )}
+                </div>
+                {globalVectorstore?.exists && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => deleteVectorstore.mutate("global")}
+                    disabled={deleteVectorstore.isPending}
+                    data-testid="button-delete-global-vectorstore"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
               <ContextFileUpload
                 title="General Context"
                 description="Upload general reference documents and knowledge base files (unlimited)"
@@ -212,7 +284,32 @@ export default function SettingsPage() {
           </Card>
 
           <Card>
-            <CardContent className="pt-6">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex-1">
+                  <CardTitle>Company Policy Context</CardTitle>
+                  {companyVectorstore?.exists && (
+                    <CardDescription className="mt-2">
+                      <span className="text-xs">
+                        📁 Vectorstore: <code className="bg-muted px-1 py-0.5 rounded">{companyVectorstore.path}</code>
+                      </span>
+                    </CardDescription>
+                  )}
+                </div>
+                {companyVectorstore?.exists && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => deleteVectorstore.mutate("company")}
+                    disabled={deleteVectorstore.isPending}
+                    data-testid="button-delete-company-vectorstore"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
               <ContextFileUpload
                 title="Company Policy Context"
                 description="Upload company policies, guidelines, and compliance documents (unlimited)"
