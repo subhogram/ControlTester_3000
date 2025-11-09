@@ -101,6 +101,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Load vectorstore from disk into memory
+  app.post("/api/vectorstore/load/:type", async (req, res) => {
+    try {
+      const { type } = req.params;
+      const { model_name } = req.body;
+      
+      if (!model_name) {
+        return res.status(400).json({ error: "model_name is required" });
+      }
+
+      const folderName = type === "global" ? "global_kb_vectorstore" : "company_kb_vectorstore";
+      const vectorstorePath = path.join(process.cwd(), folderName);
+
+      // Check if vectorstore exists on disk
+      if (!fs.existsSync(vectorstorePath)) {
+        return res.status(404).json({ error: "Vectorstore not found on disk" });
+      }
+
+      // Call external API to load the vectorstore using FormData
+      const formData = new URLSearchParams();
+      formData.append("dir_path", folderName);
+      formData.append("kb_type", type);
+      formData.append("model_name", model_name);
+
+      const response = await fetch(`http://localhost:8000/load-vectorstore`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: formData.toString(),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Failed to load vectorstore: ${errorText}`);
+      }
+
+      const result = await response.json();
+      return res.json({ success: true, path: folderName, ...result });
+    } catch (error) {
+      console.error("Error loading vectorstore:", error);
+      return res.status(500).json({ error: error instanceof Error ? error.message : "Failed to load vectorstore" });
+    }
+  });
+
   const httpServer = createServer(app);
 
   return httpServer;

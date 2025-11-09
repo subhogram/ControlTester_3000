@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { ArrowLeft, Trash2, CheckCircle2 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -41,6 +41,7 @@ export default function SettingsPage() {
     return localStorage.getItem("selectedModel") || "";
   });
   const { toast } = useToast();
+  const loadedVectorstores = useRef<Set<string>>(new Set());
 
   const { data: models, isLoading: modelsLoading, error: modelsError } = useQuery<Model[]>({
     queryKey: ["/api/models"],
@@ -56,12 +57,37 @@ export default function SettingsPage() {
     queryKey: ["/api/vectorstore/company"],
   });
 
+  // Load vectorstore mutation
+  const loadVectorstore = useMutation({
+    mutationFn: async ({ type, modelName }: { type: string; modelName: string }) => {
+      return await apiRequest("POST", `/api/vectorstore/load/${type}`, {
+        model_name: modelName,
+      });
+    },
+    onSuccess: (_, { type }) => {
+      loadedVectorstores.current.add(type);
+      toast({
+        title: "✓ Loaded Successfully",
+        description: `${type === "global" ? "General Context" : "Company Policy"} vectorstore has been loaded into memory`,
+        className: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
+      });
+    },
+    onError: (error, { type }) => {
+      toast({
+        title: "✗ Load Failed",
+        description: `Failed to load ${type === "global" ? "General Context" : "Company Policy"} vectorstore: ${error instanceof Error ? error.message : "Unknown error"}`,
+        variant: "destructive",
+      });
+    },
+  });
+
   // Delete vectorstore mutation
   const deleteVectorstore = useMutation({
     mutationFn: async (type: string) => {
       return await apiRequest("DELETE", `/api/vectorstore/${type}`);
     },
     onSuccess: (_, type) => {
+      loadedVectorstores.current.delete(type);
       queryClient.invalidateQueries({ queryKey: [`/api/vectorstore/${type}`] });
       toast({
         title: "✓ Deleted Successfully",
@@ -89,6 +115,30 @@ export default function SettingsPage() {
       setSelectedModel(models[0].value);
     }
   }, [models, selectedModel]);
+
+  // Auto-load global vectorstore when it exists and model is selected
+  useEffect(() => {
+    if (
+      globalVectorstore?.exists && 
+      selectedModel && 
+      !loadVectorstore.isPending &&
+      !loadedVectorstores.current.has("global")
+    ) {
+      loadVectorstore.mutate({ type: "global", modelName: selectedModel });
+    }
+  }, [globalVectorstore?.exists, selectedModel]);
+
+  // Auto-load company vectorstore when it exists and model is selected
+  useEffect(() => {
+    if (
+      companyVectorstore?.exists && 
+      selectedModel && 
+      !loadVectorstore.isPending &&
+      !loadedVectorstores.current.has("company")
+    ) {
+      loadVectorstore.mutate({ type: "company", modelName: selectedModel });
+    }
+  }, [companyVectorstore?.exists, selectedModel]);
 
   const handleGeneralContextUpload = async (files: File[]) => {
     try {
