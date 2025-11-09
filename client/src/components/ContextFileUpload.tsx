@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { Upload, X, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
 
 interface ContextFile {
   id: string;
@@ -16,6 +17,9 @@ interface ContextFileUploadProps {
   onRemoveFile: (id: string) => void;
   onUpload: (files: File[]) => void;
   testId: string;
+  maxFiles?: number;
+  acceptedFileTypes?: string;
+  acceptedExtensions?: string[];
 }
 
 export default function ContextFileUpload({
@@ -25,16 +29,60 @@ export default function ContextFileUpload({
   onRemoveFile,
   onUpload,
   testId,
+  maxFiles,
+  acceptedFileTypes,
+  acceptedExtensions,
 }: ContextFileUploadProps) {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const { toast } = useToast();
+
+  const validateFiles = (filesToValidate: File[]): File[] => {
+    const validFiles: File[] = [];
+    const invalidFiles: string[] = [];
+
+    for (const file of filesToValidate) {
+      if (acceptedExtensions && acceptedExtensions.length > 0) {
+        const fileExtension = file.name.split('.').pop()?.toLowerCase();
+        if (!fileExtension || !acceptedExtensions.includes(fileExtension)) {
+          invalidFiles.push(file.name);
+          continue;
+        }
+      }
+      validFiles.push(file);
+    }
+
+    if (invalidFiles.length > 0) {
+      toast({
+        title: "Invalid file type",
+        description: `${invalidFiles.length} file(s) rejected. Accepted: ${acceptedExtensions?.join(', ')}`,
+        variant: "destructive",
+      });
+    }
+
+    return validFiles;
+  };
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     const droppedFiles = Array.from(e.dataTransfer.files);
     if (droppedFiles.length > 0) {
-      setSelectedFiles((prev) => [...prev, ...droppedFiles]);
+      const validFiles = validateFiles(droppedFiles);
+      
+      if (maxFiles) {
+        const totalFiles = selectedFiles.length + files.length + validFiles.length;
+        if (totalFiles > maxFiles) {
+          toast({
+            title: "Too many files",
+            description: `Maximum ${maxFiles} files allowed. Currently: ${files.length} uploaded, ${selectedFiles.length} selected.`,
+            variant: "destructive",
+          });
+          return;
+        }
+      }
+      
+      setSelectedFiles((prev) => [...prev, ...validFiles]);
     }
-  }, []);
+  }, [selectedFiles, files, maxFiles, acceptedExtensions, toast]);
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -43,7 +91,22 @@ export default function ContextFileUpload({
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const inputFiles = e.target.files;
     if (inputFiles && inputFiles.length > 0) {
-      setSelectedFiles((prev) => [...prev, ...Array.from(inputFiles)]);
+      const validFiles = validateFiles(Array.from(inputFiles));
+      
+      if (maxFiles) {
+        const totalFiles = selectedFiles.length + files.length + validFiles.length;
+        if (totalFiles > maxFiles) {
+          toast({
+            title: "Too many files",
+            description: `Maximum ${maxFiles} files allowed. Currently: ${files.length} uploaded, ${selectedFiles.length} selected.`,
+            variant: "destructive",
+          });
+          e.target.value = "";
+          return;
+        }
+      }
+      
+      setSelectedFiles((prev) => [...prev, ...validFiles]);
       e.target.value = "";
     }
   };
