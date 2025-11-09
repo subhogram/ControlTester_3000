@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { ArrowLeft } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import ContextFileUpload from "@/components/ContextFileUpload";
 import {
@@ -18,24 +19,34 @@ interface ContextFile {
   uploadedAt: string;
 }
 
-const models = [
-  { value: "gpt-4", label: "GPT-4" },
-  { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
-  { value: "claude-3-opus", label: "Claude 3 Opus" },
-  { value: "claude-3-sonnet", label: "Claude 3 Sonnet" },
-];
+interface Model {
+  value: string;
+  label: string;
+}
 
 export default function SettingsPage() {
   const [, setLocation] = useLocation();
   const [generalContextFiles, setGeneralContextFiles] = useState<ContextFile[]>([]);
   const [companyPolicyFiles, setCompanyPolicyFiles] = useState<ContextFile[]>([]);
   const [selectedModel, setSelectedModel] = useState(() => {
-    return localStorage.getItem("selectedModel") || "gpt-4";
+    return localStorage.getItem("selectedModel") || "";
+  });
+
+  const { data: models, isLoading: modelsLoading, error: modelsError } = useQuery<Model[]>({
+    queryKey: ["/api/models"],
   });
 
   useEffect(() => {
-    localStorage.setItem("selectedModel", selectedModel);
+    if (selectedModel) {
+      localStorage.setItem("selectedModel", selectedModel);
+    }
   }, [selectedModel]);
+
+  useEffect(() => {
+    if (models && models.length > 0 && !selectedModel) {
+      setSelectedModel(models[0].value);
+    }
+  }, [models, selectedModel]);
 
   const handleGeneralContextUpload = (files: File[]) => {
     const newFiles = files.map((file) => ({
@@ -88,18 +99,30 @@ export default function SettingsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <Select value={selectedModel} onValueChange={setSelectedModel}>
-                <SelectTrigger className="w-full max-w-sm" data-testid="select-model">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {models.map((model) => (
-                    <SelectItem key={model.value} value={model.value}>
-                      {model.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {modelsLoading && (
+                <div className="text-sm text-muted-foreground" data-testid="text-loading-models">
+                  Loading models...
+                </div>
+              )}
+              {modelsError && (
+                <div className="text-sm text-destructive" data-testid="text-error-models">
+                  Failed to load models. Please check if the API is running.
+                </div>
+              )}
+              {!modelsLoading && !modelsError && models && (
+                <Select value={selectedModel} onValueChange={setSelectedModel}>
+                  <SelectTrigger className="w-full max-w-sm" data-testid="select-model">
+                    <SelectValue placeholder="Select a model" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {models.map((model) => (
+                      <SelectItem key={model.value} value={model.value}>
+                        {model.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </CardContent>
           </Card>
 
