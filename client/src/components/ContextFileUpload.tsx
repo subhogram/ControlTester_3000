@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Upload, X, FileText } from "lucide-react";
+import { Upload, X, FileText, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -34,7 +34,9 @@ export default function ContextFileUpload({
   acceptedExtensions,
 }: ContextFileUploadProps) {
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [currentPage, setCurrentPage] = useState(0);
   const { toast } = useToast();
+  const filesPerPage = 4;
 
   const validateFiles = (filesToValidate: File[]): File[] => {
     const validFiles: File[] = [];
@@ -67,22 +69,9 @@ export default function ContextFileUpload({
     const droppedFiles = Array.from(e.dataTransfer.files);
     if (droppedFiles.length > 0) {
       const validFiles = validateFiles(droppedFiles);
-      
-      if (maxFiles) {
-        const totalFiles = selectedFiles.length + files.length + validFiles.length;
-        if (totalFiles > maxFiles) {
-          toast({
-            title: "Too many files",
-            description: `Maximum ${maxFiles} files allowed. Currently: ${files.length} uploaded, ${selectedFiles.length} selected.`,
-            variant: "destructive",
-          });
-          return;
-        }
-      }
-      
       setSelectedFiles((prev) => [...prev, ...validFiles]);
     }
-  }, [selectedFiles, files, maxFiles, acceptedExtensions, toast]);
+  }, []);
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -92,35 +81,40 @@ export default function ContextFileUpload({
     const inputFiles = e.target.files;
     if (inputFiles && inputFiles.length > 0) {
       const validFiles = validateFiles(Array.from(inputFiles));
-      
-      if (maxFiles) {
-        const totalFiles = selectedFiles.length + files.length + validFiles.length;
-        if (totalFiles > maxFiles) {
-          toast({
-            title: "Too many files",
-            description: `Maximum ${maxFiles} files allowed. Currently: ${files.length} uploaded, ${selectedFiles.length} selected.`,
-            variant: "destructive",
-          });
-          e.target.value = "";
-          return;
-        }
-      }
-      
       setSelectedFiles((prev) => [...prev, ...validFiles]);
       e.target.value = "";
     }
   };
 
   const handleRemoveSelected = (index: number) => {
-    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+    setSelectedFiles((prev) => {
+      const newFiles = prev.filter((_, i) => i !== index);
+      const totalPages = Math.ceil(newFiles.length / filesPerPage);
+      if (currentPage >= totalPages && totalPages > 0) {
+        setCurrentPage(totalPages - 1);
+      }
+      return newFiles;
+    });
+  };
+
+  const handleClearAll = () => {
+    setSelectedFiles([]);
+    setCurrentPage(0);
   };
 
   const handleUpload = () => {
     if (selectedFiles.length > 0) {
       onUpload(selectedFiles);
       setSelectedFiles([]);
+      setCurrentPage(0);
     }
   };
+
+  const totalPages = Math.ceil(selectedFiles.length / filesPerPage);
+  const paginatedFiles = selectedFiles.slice(
+    currentPage * filesPerPage,
+    (currentPage + 1) * filesPerPage
+  );
 
   return (
     <div className="space-y-4">
@@ -144,7 +138,7 @@ export default function ContextFileUpload({
         <div className="text-center">
           <p className="text-sm font-medium">Drop files here or click to browse</p>
           <p className="text-xs text-muted-foreground mt-1">
-            Select one or more files
+            PDF, TXT, JPG, CSV, Excel files
           </p>
         </div>
         <input
@@ -153,6 +147,7 @@ export default function ContextFileUpload({
           onChange={handleFileInput}
           id={`file-input-${testId}`}
           multiple
+          accept={acceptedFileTypes}
           data-testid={`input-file-${testId}`}
         />
         <Button
@@ -167,45 +162,85 @@ export default function ContextFileUpload({
 
       {selectedFiles.length > 0 && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
             <h4 className="text-sm font-medium">
               Selected Files ({selectedFiles.length})
             </h4>
-            <Button
-              onClick={handleUpload}
-              size="sm"
-              data-testid={`button-upload-${testId}`}
-            >
-              Upload Files
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={handleClearAll}
+                variant="outline"
+                size="sm"
+                data-testid={`button-clear-all-${testId}`}
+              >
+                Clear All
+              </Button>
+              <Button
+                onClick={handleUpload}
+                size="sm"
+                data-testid={`button-upload-${testId}`}
+              >
+                Upload Files
+              </Button>
+            </div>
           </div>
           <div className="space-y-2">
-            {selectedFiles.map((file, index) => (
-              <div
-                key={`${file.name}-${index}`}
-                className="flex items-center justify-between p-3 border rounded-lg bg-card hover-highlight"
-                data-testid={`selected-file-${testId}-${index}`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-sm truncate">{file.name}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {(file.size / 1024).toFixed(1)} KB
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => handleRemoveSelected(index)}
-                  data-testid={`button-remove-selected-${testId}-${index}`}
+            {paginatedFiles.map((file, index) => {
+              const actualIndex = currentPage * filesPerPage + index;
+              return (
+                <div
+                  key={`${file.name}-${actualIndex}`}
+                  className="flex items-center justify-between p-3 border rounded-lg bg-card hover-elevate"
+                  data-testid={`selected-file-${testId}-${actualIndex}`}
                 >
-                  <X className="h-4 w-4" />
+                  <div className="flex items-center gap-3 min-w-0">
+                    <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm truncate">{file.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {(file.size / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleRemoveSelected(actualIndex)}
+                    data-testid={`button-remove-selected-${testId}-${actualIndex}`}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              );
+            })}
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                Page {currentPage + 1} of {totalPages}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setCurrentPage((prev) => Math.max(0, prev - 1))}
+                  disabled={currentPage === 0}
+                  data-testid={`button-prev-page-${testId}`}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setCurrentPage((prev) => Math.min(totalPages - 1, prev + 1))}
+                  disabled={currentPage === totalPages - 1}
+                  data-testid={`button-next-page-${testId}`}
+                >
+                  <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       )}
 

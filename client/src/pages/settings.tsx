@@ -130,11 +130,13 @@ export default function SettingsPage() {
             <CardContent className="pt-6">
               <ContextFileUpload
                 title="General Context"
-                description="Upload general reference documents and knowledge base files"
+                description="Upload general reference documents and knowledge base files (unlimited)"
                 files={generalContextFiles}
                 onRemoveFile={handleGeneralContextRemove}
                 onUpload={handleGeneralContextUpload}
                 testId="general"
+                acceptedFileTypes=".pdf,.txt,.jpg,.jpeg,.csv,.xls,.xlsx"
+                acceptedExtensions={['pdf', 'txt', 'jpg', 'jpeg', 'csv', 'xls', 'xlsx']}
               />
             </CardContent>
           </Card>
@@ -143,11 +145,13 @@ export default function SettingsPage() {
             <CardContent className="pt-6">
               <ContextFileUpload
                 title="Company Policy Context"
-                description="Upload company policies, guidelines, and compliance documents"
+                description="Upload company policies, guidelines, and compliance documents (unlimited)"
                 files={companyPolicyFiles}
                 onRemoveFile={handleCompanyPolicyRemove}
                 onUpload={handleCompanyPolicyUpload}
                 testId="policy"
+                acceptedFileTypes=".pdf,.txt,.jpg,.jpeg,.csv,.xls,.xlsx"
+                acceptedExtensions={['pdf', 'txt', 'jpg', 'jpeg', 'csv', 'xls', 'xlsx']}
               />
             </CardContent>
           </Card>
