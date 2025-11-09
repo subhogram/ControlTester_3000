@@ -215,6 +215,15 @@ export default function ChatPage() {
     }
   };
 
+  const handleClearChat = () => {
+    setMessages([]);
+    toast({
+      title: "✓ Chat Cleared",
+      description: "All messages have been cleared",
+      className: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
+    });
+  };
+
   const handleLogout = () => {
     console.log("Logout clicked");
   };
@@ -232,6 +241,7 @@ export default function ChatPage() {
       <ChatHeader
         onSettingsClick={() => setLocation("/settings")}
         onLogout={handleLogout}
+        onClearChat={handleClearChat}
       />
 
       <ChatMessages messages={messages} />

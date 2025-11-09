@@ -1,4 +1,4 @@
-import { Settings, LogOut, User, Moon, Sun, Sparkles } from "lucide-react";
+import { Settings, LogOut, User, Moon, Sun, Sparkles, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -12,11 +12,13 @@ import { useTheme } from "./ThemeProvider";
 interface ChatHeaderProps {
   onSettingsClick: () => void;
   onLogout: () => void;
+  onClearChat: () => void;
 }
 
 export default function ChatHeader({
   onSettingsClick,
   onLogout,
+  onClearChat,
 }: ChatHeaderProps) {
   const { theme, toggleTheme } = useTheme();
 
@@ -32,6 +34,15 @@ export default function ChatHeader({
       </div>
 
       <div className="flex items-center gap-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClearChat}
+          data-testid="button-clear-chat"
+        >
+          <Trash2 className="h-5 w-5" />
+        </Button>
+
         <Button
           variant="ghost"
           size="icon"
