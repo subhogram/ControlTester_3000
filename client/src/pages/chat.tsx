@@ -49,8 +49,9 @@ export default function ChatPage() {
 
       const result = await response.json();
       
-      // Note: Chat attachments don't need to be saved to disk as they're temporary
-      // The vectorstore is stored in chat_attachment_vectorstore/ automatically
+      // Note: Chat attachments are IN-MEMORY ONLY (not saved to disk)
+      // The vectorstore exists in chat_attachment_vectorstore/ in the external API's memory
+      // This is intentional - chat attachments are temporary and session-specific
       
       return result;
     },

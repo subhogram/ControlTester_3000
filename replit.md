@@ -131,19 +131,28 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 ### Vectorstore Management
 **All operations call external API directly from frontend:**
 
-1. **Build Vectorstore** (Settings & Chat)
+1. **Build Vectorstore**
    - API: `POST http://localhost:8000/build-knowledge-base`
    - Parameters: `batch_size=15`, `delay_between_batches=0.2`, `max_retries=3`
-   - Creates vectorstore folders automatically
+   - Creates vectorstore:
+     - **Settings (global)**: Creates `global_kb_vectorstore/` (saved to disk)
+     - **Settings (company)**: Creates `company_kb_vectorstore/` (saved to disk)
+     - **Chat**: Creates `chat_attachment_vectorstore/` (IN-MEMORY ONLY, not saved)
 
-2. **Save Vectorstore** (Settings)
+2. **Save Vectorstore** (Settings only)
    - API: `POST http://localhost:8000/save-vectorstore`
-   - Saves to: `global_kb_vectorstore/` or `company_kb_vectorstore/`
+   - Saves to disk: `global_kb_vectorstore/` or `company_kb_vectorstore/`
+   - **NOT called for chat attachments** - they remain in memory only
 
 3. **Load Vectorstore** (Settings - Auto-load on model selection)
    - API: `POST http://localhost:8000/load-vectorstore`
    - Loads from saved folders into memory
    - Returns vector count for status badge
+
+### Vectorstore Persistence
+- ✅ **Global KB**: Saved to disk, persists across sessions
+- ✅ **Company KB**: Saved to disk, persists across sessions  
+- 🔄 **Chat Attachments**: In-memory only, cleared when external API restarts
 
 ## Recent Changes (November 9, 2025)
 
