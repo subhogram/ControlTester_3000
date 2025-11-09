@@ -6,22 +6,12 @@ type ToasterToast = {
   description?: string;
   action?: React.ReactNode;
   variant?: "default" | "destructive";
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 };
 
 const TOAST_LIMIT = 1;
 const TOAST_REMOVE_DELAY = 1000000;
-
-type ToastActionElement = React.ReactNode;
-
-type Toast = {
-  id: string;
-  title?: React.ReactNode;
-  description?: React.ReactNode;
-  action?: ToastActionElement;
-  variant?: "default" | "destructive";
-  open?: boolean;
-  onOpenChange?: (open: boolean) => void;
-};
 
 const actionTypes = {
   ADD_TOAST: "ADD_TOAST",
