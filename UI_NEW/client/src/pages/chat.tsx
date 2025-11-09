@@ -6,7 +6,13 @@ import FileActionsPanel from "@/components/FileActionsPanel";
 
 export default function Chat() {
   const [files, setFiles] = useState<File[]>([]);
-  const [messages, setMessages] = useState<Array<{ id: string; role: "user" | "assistant"; content: string; files?: File[] }>>([]);
+  const [messages, setMessages] = useState<Array<{ id: string; role: "user" | "assistant"; content: string; files?: File[] }>>([
+    {
+      id: "welcome",
+      role: "assistant",
+      content: "👋 Welcome to Assess-AI! Upload files to enable the FAB (Floating Action Button) for TOD and TOE actions.",
+    }
+  ]);
 
   const handleSendMessage = (content: string, attachedFiles: File[]) => {
     const newMessage = {
