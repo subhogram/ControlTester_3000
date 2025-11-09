@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Upload, X, FileText, ChevronLeft, ChevronRight } from "lucide-react";
+import { Upload, X, FileText, ChevronLeft, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
@@ -111,12 +111,13 @@ export default function ContextFileUpload({
         setSelectedFiles([]);
         setCurrentPage(0);
         toast({
-          title: "Success",
-          description: `Successfully uploaded ${selectedFiles.length} file(s)`,
+          title: "✓ Success",
+          description: `Successfully uploaded ${selectedFiles.length} file(s) and built knowledge base`,
+          className: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
         });
       } catch (error) {
         toast({
-          title: "Upload failed",
+          title: "✗ Upload failed",
           description: error instanceof Error ? error.message : "Failed to upload files",
           variant: "destructive",
         });
@@ -198,7 +199,14 @@ export default function ContextFileUpload({
                 disabled={isUploading}
                 data-testid={`button-upload-${testId}`}
               >
-                {isUploading ? "Uploading..." : "Upload Files"}
+                {isUploading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Building Knowledge Base...
+                  </>
+                ) : (
+                  "Upload Files"
+                )}
               </Button>
             </div>
           </div>
