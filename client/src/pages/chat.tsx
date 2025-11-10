@@ -94,11 +94,22 @@ export default function ChatPage() {
   });
 
   const chatMutation = useMutation({
-    mutationFn: async ({ user_input, selected_model, has_attachments }: { user_input: string; selected_model: string; has_attachments: boolean }) => {
+    mutationFn: async ({ 
+      user_input, 
+      selected_model, 
+      has_attachments, 
+      chat_history 
+    }: { 
+      user_input: string; 
+      selected_model: string; 
+      has_attachments: boolean;
+      chat_history: Array<{role: string; content: string}>;
+    }) => {
       // Call external API directly, exactly like file upload
       const payload: any = {
         selected_model,
         user_input,
+        chat_history,  // Include full conversation history
         global_kb_path: "global_kb_vectorstore",
         company_kb_path: "company_kb_vectorstore",
       };
@@ -237,6 +248,14 @@ export default function ChatPage() {
       console.log("Vectorstore loading info:", error);
     }
 
+    // Prepare chat history (exclude loading messages and error messages)
+    const chatHistory = messages
+      .filter(msg => msg.content !== "loading" && !msg.content.startsWith("⚠️") && !msg.content.startsWith("❌"))
+      .map(msg => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
     // Add loading message
     const loadingMessageId = (Date.now() + 1).toString();
     const loadingMessage: Message = {
@@ -255,6 +274,7 @@ export default function ChatPage() {
         user_input: content,
         selected_model: selectedModel,
         has_attachments: currentHasAttachments,
+        chat_history: chatHistory,
       });
 
       // Replace loading message with actual response

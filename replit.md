@@ -98,7 +98,7 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
   
 - `POST /chat` - Chat with AI using loaded vectorstores
   - Method: JSON
-  - Request body: `{ selected_model, user_input, global_kb_path, company_kb_path, chat_kb_path }`
+  - Request body: `{ selected_model, user_input, chat_history, global_kb_path, company_kb_path, chat_kb_path }`
   - Response: `{ success, response, loaded_paths }`
 
 ## Data Flow
@@ -130,6 +130,10 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
    {
      "selected_model": "model_name",
      "user_input": "user question",
+     "chat_history": [
+       {"role": "user", "content": "previous question"},
+       {"role": "assistant", "content": "previous answer"}
+     ],
      "global_kb_path": "global_kb_vectorstore",
      "company_kb_path": "company_kb_vectorstore",
      "chat_kb_path": "chat_attachment_vectorstore"  // if has_attachments
