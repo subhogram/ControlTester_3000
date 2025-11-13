@@ -533,29 +533,56 @@ async def chat_with_memory(request: ChatRequest):
     evidence_loaded = bool(loaded_stores.get('evidence'))
 
     query_lower = request.user_input.lower()
-    needs_kb = any(w in query_lower for w in ['policy', 'standard', 'compliance', 'regulation', 'framework'])
-    needs_evidence = any(w in query_lower for w in ['assess', 'audit', 'log', 'evidence', 'test', 'verify'])
-    needs_company = any(w in query_lower for w in ['company', 'soc', 'cri', 'organization', 'internal'])
 
-    if (needs_kb and not kb_loaded) or (needs_evidence and not evidence_loaded) or (needs_company and not company_loaded):
-        # Return error suggesting missing context
-        missing = []
-        if needs_kb and not kb_loaded:
-            missing.append('security policies/standards')
-        if needs_evidence and not evidence_loaded:
-            missing.append('evidence/log files')
-        if needs_company and not company_loaded:
-            missing.append('company documents')
+    # Expanded keyword detection for better accuracy
+    needs_kb = any(w in query_lower for w in [
+        'policy', 'policies', 'standard', 'standards', 'compliance', 
+        'regulation', 'framework', 'guideline', 'requirement', 'iso', 
+        'nist', 'control', 'governance'
+    ])
+    needs_evidence = any(w in query_lower for w in [
+        'assess', 'audit', 'test', 'verify', 'evidence', 'log', 'logs', 
+        'analyze', 'review', 'check', 'examine', 'investigate', 'scan',
+        'finding', 'vulnerability', 'incident'
+    ])
+    needs_company = any(w in query_lower for w in [
+        'company', 'organization', 'soc', 'soc2', 'cri', 'profile',
+        'specific', 'our', 'internal', 'organizational', 'entity'
+    ])
 
-        logger.warning(f"Chat blocked - missing context: {missing}")
+    # Build detailed missing context information
+    missing_contexts = []
+    if needs_kb and not kb_loaded:
+        missing_contexts.append({
+            'type': 'Security Policies & Standards',
+            'description': 'information security policies, standards, and frameworks',
+            'examples': 'ISO 27001, NIST CSF, COBIT, internal security policies, compliance frameworks',
+            'formats': 'PDF, TXT, DOCX, XLSX',
+            'kb_type': 'global',
+            'emoji': '📋'
+        })
+    if needs_evidence and not evidence_loaded:
+        missing_contexts.append({
+            'type': 'Evidence & Logs',
+            'description': 'security logs, audit evidence, or system outputs',
+            'examples': 'access logs, firewall logs, SIEM reports, configuration files, vulnerability scans',
+            'formats': 'LOG, TXT, CSV, PDF, JSON, XML',
+            'kb_type': 'evidence',
+            'emoji': '🔍'
+        })
+    if needs_company and not company_loaded:
+        missing_contexts.append({
+            'type': 'Company Documents',
+            'description': 'company-specific documentation and reports',
+            'examples': 'SOC 2 reports, CRI profiles, organizational policies, risk assessments',
+            'formats': 'PDF, TXT, DOCX, XLSX',
+            'kb_type': 'company',
+            'emoji': '🏢'
+        })
 
-        return ChatResponse(
-            success=False,
-            session_id=session_id,
-            error=f"Missing required context: {', '.join(missing)}. Please upload the necessary files first using the /build-knowledge-base endpoint.",
-            message_count=session.get('message_count', 0),
-            loaded_paths=loaded_paths
-        )
+    # If context is missing, respond with helpful guidance IN THE CHAT
+    if missing_contexts:
+        response_message = f"""**📋 Missing Required Context**"""
 
     # ============================================================================
     # STEP 3: Continue with normal chat processing
@@ -606,7 +633,7 @@ async def chat_with_memory(request: ChatRequest):
         chat_context = "\n\n".join([c.page_content for c in chat_contexts]) if chat_contexts else "No chat attachments"
 
         # Build prompt with all contexts (Phase 2 enhanced)
-        enhanced_prompt = f"""You are a highly capable cybersecurity assistant with comprehensive memory and context awareness.
+        enhanced_prompt = f"""You are a highly capable cybersecurity audit and analysis assistant with comprehensive memory and context awareness.
 
 You have been designed to provide accurate, actionable guidance based on available information. If you lack necessary context, you should clearly state what is missing rather than guessing.
 
@@ -648,18 +675,20 @@ You have been designed to provide accurate, actionable guidance based on availab
 6. Use bullet points, numbered lists, and tables where appropriate
 7. Provide examples when explaining concepts
 8. If information is partially available, answer what you can and note what's missing
+9. Always validate if Chat File Attachments are relevant to the context or user input, if not say why it is not relevant and stop further processing.
 
 **Professional Standards:**
-9. Maintain a professional cybersecurity audit assistant tone
-10. Acknowledge limitations - if critical information is missing, state it clearly
-11. Never hallucinate or invent information
-12. When unsure, ask clarifying questions or suggest next steps
+10. Maintain a professional cybersecurity audit assistant tone
+11. Acknowledge limitations - if critical information is missing, state it clearly
+12. Never hallucinate or invent information
+13. When unsure, ask clarifying questions or suggest next steps
 
 **Response Format:**
 - For policy questions: Quote relevant sections and provide interpretation
 - For assessments: Provide structured analysis with findings and recommendations
 - For comparisons: Use tables to show differences
 - For follow-ups: Build on previous context seamlessly
+- For small talk: Reply with very small generic replies
 
 Your comprehensive response:"""
 
