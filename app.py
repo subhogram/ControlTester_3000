@@ -120,6 +120,22 @@ def add_message_to_enhanced_history(role, content, metadata=None):
 # Initialize memory at module level
 initialize_conversation_memory()
 
+def initialize_agent_state():
+    """Initialize agent state for feedback loops"""
+
+    if 'agent_pending_request' not in st.session_state:
+        st.session_state['agent_pending_request'] = None
+
+    if 'original_query' not in st.session_state:
+        st.session_state['original_query'] = None
+
+    if 'request_counter' not in st.session_state:
+        st.session_state['request_counter'] = 0
+
+    logger.info("Agent state initialized for Phase 2")
+
+initialize_agent_state()
+
 st.set_page_config(page_title="Control Risk Audit Bot", layout="wide")
 with open("kpmg_logo.png", "rb") as logo_file:
     logo_base64 = base64.b64encode(logo_file.read()).decode("utf-8")

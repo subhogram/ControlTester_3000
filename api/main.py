@@ -2,6 +2,7 @@
 Complete FastAPI wrapper for ControlTester_3000 with Session & Memory Management
 File: api/main.py
 Includes session management, conversation memory, and enhanced chat capabilities
+Phase 1 + Phase 2 implementation - FIXED VERSION
 """
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, status
@@ -24,7 +25,6 @@ from utils.file_handlers import save_faiss_vectorstore, load_faiss_vectorstore
 from utils.llm_chain import build_knowledge_base, assess_evidence_with_kb, generate_executive_summary
 from utils.find_llm import get_ollama_model_names
 from langchain.schema import Document
-# REMOVED: from utils.chat import chat_with_ai  # This import was causing the error
 from utils.pdf_generator import generate_workbook
 
 # Add for session management
@@ -57,7 +57,8 @@ app = FastAPI(
         {"name": "knowledge-base", "description": "Knowledge base creation"},
         {"name": "assessment", "description": "Evidence assessment and audit analysis"},
         {"name": "chat", "description": "Chat with memory and context"},
-        {"name": "session", "description": "Session management"}
+        {"name": "session", "description": "Session management"},
+        {"name": "analysis", "description": "Query analysis for active feedback"}
     ]
 )
 
@@ -229,6 +230,23 @@ class ChatResponse(BaseModel):
     message_count: int = 0
     loaded_paths: Optional[Dict[str, Optional[str]]] = None
 
+# ============================================================================
+# PHASE 2: QUERY ANALYSIS MODELS
+# ============================================================================
+
+class QueryAnalysisRequest(BaseModel):
+    user_input: str = Field(..., description="User query to analyze")
+    kb_loaded: bool = Field(False, description="Whether knowledge base is loaded")
+    company_loaded: bool = Field(False, description="Whether company KB is loaded")
+    evidence_loaded: bool = Field(False, description="Whether evidence KB is loaded")
+
+class QueryAnalysisResponse(BaseModel):
+    can_proceed: bool
+    missing_context: List[str]
+    clarification_needed: bool
+    reasoning: str
+    agent_request: Optional[Dict[str, Any]] = None
+
 # ----------------------------------------------------------------------------
 # Validation helpers
 # ----------------------------------------------------------------------------
@@ -259,6 +277,7 @@ async def root():
             "summary": "/generate-summary",
             "models": "/models",
             "chat": "/chat",
+            "analyze": "/analyze-query",
             "session_create": "/session/create",
             "session_info": "/session/{session_id}",
             "session_clear": "/session/{session_id}",
@@ -325,7 +344,124 @@ async def get_session_history(session_id: str, limit: int = 50):
     return {"session_id": session_id, "messages": history, "total": len(history)}
 
 # ============================================================================
-# ENHANCED CHAT ENDPOINT WITH MEMORY
+# PHASE 2: HELPER FUNCTION
+# ============================================================================
+
+def create_agent_request_api(needs: dict) -> dict:
+    """Create agent request for API"""
+    if needs['clarification_needed']:
+        return {
+            'type': 'clarification',
+            'message': 'Please provide more details about what you would like to know. For example, you could ask about specific security policies, request an assessment of evidence files, or inquire about company-specific compliance requirements.'
+        }
+
+    if needs['missing_context']:
+        file_map = {
+            'policy_documents': {
+                'category': 'policy',
+                'types': ['pdf', 'txt', 'docx'],
+                'description': 'security policies and standards (e.g., ISO 27001, NIST frameworks)'
+            },
+            'evidence_files': {
+                'category': 'evidence',
+                'types': ['log', 'txt', 'csv', 'pdf'],
+                'description': 'security logs and evidence files (e.g., access logs, firewall logs)'
+            },
+            'company_documents': {
+                'category': 'company',
+                'types': ['pdf', 'txt', 'docx', 'xlsx'],
+                'description': 'company-specific documents (e.g., SOC 2 reports, CRI profiles)'
+            }
+        }
+
+        missing = needs['missing_context'][0]
+        file_info = file_map.get(missing, {})
+
+        return {
+            'type': 'file_upload',
+            'message': f"To proceed with your request, I need {file_info.get('description', 'required files')}. Please upload the necessary files.",
+            'file_category': file_info.get('category', 'general'),
+            'accepted_types': file_info.get('types', ['pdf', 'txt']),
+            'missing_type': missing
+        }
+
+    return None
+
+# ============================================================================
+# PHASE 2: ANALYSIS ENDPOINT
+# ============================================================================
+
+@app.post("/analyze-query", response_model=QueryAnalysisResponse, tags=["analysis"])
+async def analyze_query(request: QueryAnalysisRequest):
+    """
+    Analyze user query to determine if agent can proceed or needs additional context.
+    This enables the active feedback loop.
+    """
+    needs = {
+        'can_proceed': True,
+        'missing_context': [],
+        'clarification_needed': False,
+        'reasoning': ''
+    }
+
+    query_lower = request.user_input.lower()
+
+    # Define keyword patterns
+    policy_keywords = ['policy', 'policies', 'standard', 'standards', 'guideline', 
+                      'compliance', 'regulation', 'requirement', 'framework', 'iso', 'nist']
+    evidence_keywords = ['assess', 'audit', 'test', 'verify', 'evidence', 'log', 
+                        'logs', 'analyze', 'review', 'check', 'examine', 'investigate']
+    company_keywords = ['company', 'organization', 'soc', 'soc2', 'cri', 'profile',
+                       'specific', 'our', 'internal', 'organizational']
+
+    # Check for missing knowledge bases
+    if any(keyword in query_lower for keyword in policy_keywords):
+        if not request.kb_loaded:
+            needs['can_proceed'] = False
+            needs['missing_context'].append('policy_documents')
+            needs['reasoning'] = 'Query requires security policies/standards but none are loaded'
+
+    if any(keyword in query_lower for keyword in evidence_keywords):
+        if not request.evidence_loaded:
+            needs['can_proceed'] = False
+            needs['missing_context'].append('evidence_files')
+            needs['reasoning'] = 'Query requires evidence/log files for assessment but none are loaded'
+
+    if any(keyword in query_lower for keyword in company_keywords):
+        if not request.company_loaded:
+            needs['can_proceed'] = False
+            needs['missing_context'].append('company_documents')
+            needs['reasoning'] = 'Query requires company-specific documents but none are loaded'
+
+    # Check for vague queries
+    words = request.user_input.strip().split()
+    if len(words) < 3:
+        needs['clarification_needed'] = True
+        needs['reasoning'] = 'Query is too short or vague to determine intent'
+
+    # Check for generic queries
+    generic_patterns = ['help', 'hi', 'hello', 'what can you do', 'explain']
+    if any(pattern in query_lower for pattern in generic_patterns) and len(words) < 5:
+        needs['clarification_needed'] = True
+        needs['reasoning'] = 'Query is generic and needs more specific context'
+
+    # Create agent request if needed
+    agent_request = None
+    if not needs['can_proceed'] or needs['clarification_needed']:
+        agent_request = create_agent_request_api(needs)
+
+    logger.info(f"Query analysis: can_proceed={needs['can_proceed']}, missing={needs['missing_context']}, clarification={needs['clarification_needed']}")
+
+    return QueryAnalysisResponse(
+        can_proceed=needs['can_proceed'],
+        missing_context=needs['missing_context'],
+        clarification_needed=needs['clarification_needed'],
+        reasoning=needs['reasoning'],
+        agent_request=agent_request
+    )
+
+# ============================================================================
+# ENHANCED CHAT ENDPOINT WITH MEMORY (FIXED)
 # ============================================================================
 
 @app.post("/chat", response_model=ChatResponse, tags=["chat"], summary="Chat with memory")
@@ -362,7 +498,9 @@ async def chat_with_memory(request: ChatRequest):
     embed_name = request.embedding_model or os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
     embeddings_for_load = OllamaEmbeddings(model=embed_name, base_url=base_url)
 
-    # Load vectorstores
+    # ============================================================================
+    # STEP 1: CREATE loaded_stores FIRST (FIX FOR UnboundLocalError)
+    # ============================================================================
     loaded_stores: Dict[str, Any] = {"global": None, "company": None, "evidence": None, "chat": None}
     loaded_paths: Dict[str, Optional[str]] = {"global": None, "company": None, "evidence": None, "chat": None}
 
@@ -386,6 +524,42 @@ async def chat_with_memory(request: ChatRequest):
             loaded_paths['evidence'] = "in-memory"
     except Exception as e:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Vectorstore loading error: {e}")
+
+    # ============================================================================
+    # STEP 2: NOW RUN PHASE 2 VALIDATION (AFTER loaded_stores exists)
+    # ============================================================================
+    kb_loaded = bool(loaded_stores.get('global'))
+    company_loaded = bool(loaded_stores.get('company'))
+    evidence_loaded = bool(loaded_stores.get('evidence'))
+
+    query_lower = request.user_input.lower()
+    needs_kb = any(w in query_lower for w in ['policy', 'standard', 'compliance', 'regulation', 'framework'])
+    needs_evidence = any(w in query_lower for w in ['assess', 'audit', 'log', 'evidence', 'test', 'verify'])
+    needs_company = any(w in query_lower for w in ['company', 'soc', 'cri', 'organization', 'internal'])
+
+    if (needs_kb and not kb_loaded) or (needs_evidence and not evidence_loaded) or (needs_company and not company_loaded):
+        # Return error suggesting missing context
+        missing = []
+        if needs_kb and not kb_loaded:
+            missing.append('security policies/standards')
+        if needs_evidence and not evidence_loaded:
+            missing.append('evidence/log files')
+        if needs_company and not company_loaded:
+            missing.append('company documents')
+
+        logger.warning(f"Chat blocked - missing context: {missing}")
+
+        return ChatResponse(
+            success=False,
+            session_id=session_id,
+            error=f"Missing required context: {', '.join(missing)}. Please upload the necessary files first using the /build-knowledge-base endpoint.",
+            message_count=session.get('message_count', 0),
+            loaded_paths=loaded_paths
+        )
+
+    # ============================================================================
+    # STEP 3: Continue with normal chat processing
+    # ============================================================================
 
     # Get conversation history
     conversation_history = ""
@@ -431,8 +605,10 @@ async def chat_with_memory(request: ChatRequest):
         evid_context = "\n\n".join([c.page_content for c in evid_contexts]) if evid_contexts else "No evidence context"
         chat_context = "\n\n".join([c.page_content for c in chat_contexts]) if chat_contexts else "No chat attachments"
 
-        # Build prompt with all contexts
+        # Build prompt with all contexts (Phase 2 enhanced)
         enhanced_prompt = f"""You are a highly capable cybersecurity assistant with comprehensive memory and context awareness.
+
+You have been designed to provide accurate, actionable guidance based on available information. If you lack necessary context, you should clearly state what is missing rather than guessing.
 
 === KNOWLEDGE SOURCES ===
 
@@ -461,13 +637,29 @@ async def chat_with_memory(request: ChatRequest):
 
 === INSTRUCTIONS ===
 
-1. Use ALL available context to provide comprehensive answers
-2. Reference previous conversations when relevant ("As we discussed earlier...")
-3. Cite your sources (policies, company docs, evidence, past discussion)
-4. Maintain conversation continuity - build upon previous answers
+**Context-Aware Responding:**
+1. Use ALL available context to provide the most comprehensive answer possible
+2. Reference previous conversations when relevant (e.g., "As we discussed earlier...")
+3. Cite your sources by mentioning which context you're using (policies, company docs, evidence, past discussion)
+4. Maintain conversation continuity - build upon previous answers for follow-up questions
+
+**Quality Guidelines:**
 5. Be specific and actionable with concrete recommendations
-6. Acknowledge limitations if information is missing
-7. Maintain professional cybersecurity audit assistant tone
+6. Use bullet points, numbered lists, and tables where appropriate
+7. Provide examples when explaining concepts
+8. If information is partially available, answer what you can and note what's missing
+
+**Professional Standards:**
+9. Maintain a professional cybersecurity audit assistant tone
+10. Acknowledge limitations - if critical information is missing, state it clearly
+11. Never hallucinate or invent information
+12. When unsure, ask clarifying questions or suggest next steps
+
+**Response Format:**
+- For policy questions: Quote relevant sections and provide interpretation
+- For assessments: Provide structured analysis with findings and recommendations
+- For comparisons: Use tables to show differences
+- For follow-ups: Build on previous context seamlessly
 
 Your comprehensive response:"""
 
@@ -517,6 +709,7 @@ Context: Exchange on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
             message_count=session.get('message_count', 0),
             loaded_paths=loaded_paths
         )
+
 
 # ----------------------------------------------------------------------------
 # Knowledge Base Building Endpoint

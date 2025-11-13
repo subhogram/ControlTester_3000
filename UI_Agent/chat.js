@@ -1,17 +1,26 @@
-/* Enhanced chat integration with memory management */
+/* Enhanced chat with Phase 2 active feedback loop */
 (function () {
-  // Initialize memory manager
   let memoryManager = null;
+  let agentState = null;
 
   function $(id) { return document.getElementById(id); }
 
-  function initMemoryManager() {
+  function initManagers() {
     if (window.ChatMemoryManager) {
       memoryManager = new window.ChatMemoryManager();
       memoryManager.displaySessionInfo();
       console.log('Memory manager initialized');
-    } else {
-      console.warn('ChatMemoryManager not loaded');
+    }
+
+    if (window.AgentStateManager) {
+      agentState = new window.AgentStateManager();
+      agentState.loadPendingRequest();
+      console.log('Agent state manager initialized');
+
+      // Check if there's a pending request to render
+      if (agentState.hasPendingRequest()) {
+        renderPendingRequest();
+      }
     }
   }
 
@@ -24,7 +33,6 @@
 
   function renderMarkdownSafe(text) {
     try {
-      // Prefer marked + DOMPurify if available
       if (window.marked) {
         if (typeof window.marked.setOptions === 'function') {
           window.marked.setOptions({ gfm: true, breaks: true, headerIds: false, mangle: false });
@@ -33,19 +41,15 @@
           ? window.marked.parse(String(text ?? ""))
           : window.marked(String(text ?? ""));
         const clean = window.DOMPurify ? window.DOMPurify.sanitize(rawHtml, { USE_PROFILES: { html: true } }) : rawHtml;
-        // Ensure safe link targets
         const tmp = document.createElement('div');
         tmp.innerHTML = clean;
         tmp.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener noreferrer'; });
         return tmp.innerHTML;
       }
-    } catch { /* fall through to basic */ }
+    } catch { /* fall through */ }
 
-    // Basic fallback: escape then minimal formatting
     const safe = escapeHtml(String(text ?? ""));
-    // linkify URLs
     const linkified = safe.replace(/(https?:\/\/[^\s)]+)(?![^<]*>|[^&]*;)/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1<\/a>');
-    // preserve newlines
     return linkified.replace(/\n/g, '<br>');
   }
 
@@ -58,9 +62,8 @@
         });
       }
 
-      // Wrap code blocks with header (language + copy)
       el.querySelectorAll('pre > code').forEach(codeEl => {
-        if (codeEl.closest('.code-block')) return; // already wrapped
+        if (codeEl.closest('.code-block')) return;
         const preEl = codeEl.parentElement;
         if (!preEl) return;
 
@@ -104,7 +107,6 @@
     const wrap = $("chat-messages");
     if (!wrap) return;
 
-    // Remove empty state if present
     const empty = wrap.querySelector(".chat-empty");
     if (empty) empty.remove();
 
@@ -143,67 +145,303 @@
 
   async function sendMessage(e) {
     if (e) e.preventDefault();
-    const input = $("chat-input");
+
+    const input = $('chat-input');
     if (!input) return;
     const text = input.value.trim();
     if (!text) return;
 
-    const model = sessionStorage.getItem("selectedModel");
+    const model = sessionStorage.getItem('selectedModel');
     if (!model) {
-      // Reuse UIManager toast if available; else alert
-      try {
-        window.uiManager?.showToast("Please select a session model first.", "warning");
-      } catch { alert("Please select a session model first."); }
+      showToast('Please select a model first', 'warning');
       return;
     }
 
-    appendMessage("user", text);
-    input.value = "";
+    // PHASE 2: Check context status
+    const kbLoaded = sessionStorage.getItem('kbReady') === 'true';
+    const companyLoaded = sessionStorage.getItem('companyReady') === 'true';
+    const evidenceLoaded = sessionStorage.getItem('evidenceReady') === 'true';
+
+    appendMessage('user', text);
+    input.value = '';
     setSending(true);
 
     try {
+      // PHASE 2: Analyze query first
+      if (agentState) {
+        const analysis = await agentState.analyzeQuery(
+          text, kbLoaded, companyLoaded, evidenceLoaded
+        );
+
+        if (analysis.needsAction) {
+          // Agent needs something - render request UI
+          agentState.setPendingRequest(analysis.request, text);
+          appendMessage('assistant', analysis.request.message);
+          renderPendingRequest();
+          setSending(false);
+          return;
+        }
+      }
+
+      // Can proceed normally
       let result;
-
       if (memoryManager) {
-        // Use memory manager for enhanced context
         result = await memoryManager.sendMessage(text, model);
-
         if (result.success) {
-          appendMessage("assistant", result.response);
+          appendMessage('assistant', result.response);
           memoryManager.displaySessionInfo();
         } else {
-          appendMessage("assistant", `⚠️ ${result.error}`);
+          appendMessage('assistant', `⚠️ ${result.error}`);
         }
       } else {
-        // Fallback to original implementation
-        const chatPath = sessionStorage.getItem("chatAttachmentPath");
-        const res = await fetch("http://localhost:8000/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+        // Fallback
+        const res = await fetch('http://localhost:8000/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             selected_model: model,
-            user_input: text,
-            ...(chatPath ? { chat_kb_path: chatPath } : {})
+            user_input: text
           })
         });
 
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
-
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        if (data && data.success && data.response) {
-          appendMessage("assistant", data.response);
+
+        if (data.success && data.response) {
+          appendMessage('assistant', data.response);
         } else {
-          appendMessage("assistant", data?.error || "No response");
+          appendMessage('assistant', data.error || 'No response');
         }
       }
     } catch (err) {
-      appendMessage("assistant", `⚠️ ${err.message || err}`);
+      appendMessage('assistant', `⚠️ ${err.message}`);
     } finally {
       setSending(false);
-      setModelPill();
     }
+  }
+
+  function renderPendingRequest() {
+    const request = agentState.getPendingRequest();
+    if (!request) return;
+
+    const chatMessages = $('chat-messages');
+    const chatForm = $('chat-form');
+
+    if (!chatMessages || !chatForm) return;
+
+    // Hide normal chat form
+    chatForm.style.display = 'none';
+
+    // Create pending request UI
+    const pendingUI = document.createElement('div');
+    pendingUI.id = 'pending-request-ui';
+    pendingUI.className = 'pending-request-container';
+
+    if (request.type === 'file_upload') {
+      pendingUI.innerHTML = `
+        <div class="pending-request-header">
+          <h4>📁 Agent Request: Files Needed</h4>
+        </div>
+        <div class="pending-request-body">
+          <p>${escapeHtml(request.message)}</p>
+          <input type="file" id="agent-file-upload" 
+                 accept="${request.accepted_types.map(t => '.' + t).join(',')}"
+                 multiple />
+          <div class="pending-actions">
+            <button id="submit-files-btn" class="btn-primary">✅ Submit Files</button>
+            <button id="cancel-request-btn" class="btn-secondary">❌ Cancel</button>
+          </div>
+        </div>
+      `;
+    } else if (request.type === 'clarification') {
+      pendingUI.innerHTML = `
+        <div class="pending-request-header">
+          <h4>⚠️ Agent Request: Clarification Needed</h4>
+        </div>
+        <div class="pending-request-body">
+          <p>${escapeHtml(request.message)}</p>
+          <textarea id="clarification-input" rows="3" 
+                    placeholder="Please provide more details..."></textarea>
+          <div class="pending-actions">
+            <button id="submit-clarification-btn" class="btn-primary">✅ Submit</button>
+            <button id="cancel-request-btn" class="btn-secondary">❌ Cancel</button>
+          </div>
+        </div>
+      `;
+    }
+
+    // Remove existing pending UI if any
+    const existing = $('pending-request-ui');
+    if (existing) existing.remove();
+
+    // Insert before chat messages
+    chatMessages.parentElement.insertBefore(pendingUI, chatMessages);
+
+    // Wire events
+    const cancelBtn = $('cancel-request-btn');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        agentState.clearPendingRequest();
+        pendingUI.remove();
+        chatForm.style.display = 'block';
+      });
+    }
+
+    if (request.type === 'file_upload') {
+      const submitBtn = $('submit-files-btn');
+      const fileInput = $('agent-file-upload');
+
+      if (submitBtn && fileInput) {
+        submitBtn.addEventListener('click', async () => {
+          const files = fileInput.files;
+          if (!files || files.length === 0) {
+            showToast('Please select files first', 'warning');
+            return;
+          }
+
+          await handleFileUpload(files, request);
+        });
+      }
+    } else if (request.type === 'clarification') {
+      const submitBtn = $('submit-clarification-btn');
+      const clarificationInput = $('clarification-input');
+
+      if (submitBtn && clarificationInput) {
+        submitBtn.addEventListener('click', async () => {
+          const clarification = clarificationInput.value.trim();
+          if (!clarification) {
+            showToast('Please provide clarification', 'warning');
+            return;
+          }
+
+          await handleClarification(clarification);
+        });
+      }
+    }
+  }
+
+  async function handleFileUpload(files, request) {
+    const formData = new FormData();
+    for (let file of files) {
+      formData.append('files', file);
+    }
+
+    const model = sessionStorage.getItem('selectedModel');
+    formData.append('selected_model', model);
+    formData.append('kb_type', request.file_category);
+
+    try {
+      setSending(true);
+      showToast('Processing files...', 'info');
+
+      const response = await fetch('http://localhost:8000/build-knowledge-base', {
+        method: 'POST',
+        body: formData
+      });
+
+      if (!response.ok) throw new Error('File upload failed');
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Update session storage
+        if (request.missing_type === 'policy_documents') {
+          sessionStorage.setItem('kbReady', 'true');
+        } else if (request.missing_type === 'evidence_files') {
+          sessionStorage.setItem('evidenceReady', 'true');
+        } else if (request.missing_type === 'company_documents') {
+          sessionStorage.setItem('companyReady', 'true');
+        }
+
+        showToast('Files processed successfully!', 'success');
+
+        // Now retry original query
+        await retryOriginalQuery();
+      } else {
+        throw new Error(data.error_details || 'Processing failed');
+      }
+    } catch (error) {
+      showToast(`Upload error: ${error.message}`, 'error');
+      appendMessage('assistant', `⚠️ File upload error: ${error.message}`);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function handleClarification(clarification) {
+    const originalQuery = agentState.getOriginalQuery();
+    const enhancedQuery = `${originalQuery}\n\nAdditional context: ${clarification}`;
+
+    // Clear pending request
+    agentState.clearPendingRequest();
+    const pendingUI = $('pending-request-ui');
+    if (pendingUI) pendingUI.remove();
+    $('chat-form').style.display = 'block';
+
+    // Send enhanced query
+    appendMessage('user', `[Clarified] ${enhancedQuery}`);
+
+    try {
+      setSending(true);
+      const model = sessionStorage.getItem('selectedModel');
+
+      if (memoryManager) {
+        const result = await memoryManager.sendMessage(enhancedQuery, model);
+        if (result.success) {
+          appendMessage('assistant', result.response);
+          memoryManager.displaySessionInfo();
+        } else {
+          appendMessage('assistant', `⚠️ ${result.error}`);
+        }
+      }
+    } catch (error) {
+      appendMessage('assistant', `⚠️ ${error.message}`);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function retryOriginalQuery() {
+    const originalQuery = agentState.getOriginalQuery();
+
+    // Clear pending request UI
+    agentState.clearPendingRequest();
+    const pendingUI = $('pending-request-ui');
+    if (pendingUI) pendingUI.remove();
+    $('chat-form').style.display = 'block';
+
+    appendMessage('user', `[After uploading files] ${originalQuery}`);
+
+    try {
+      setSending(true);
+      const model = sessionStorage.getItem('selectedModel');
+
+      if (memoryManager) {
+        const result = await memoryManager.sendMessage(originalQuery, model);
+        if (result.success) {
+          appendMessage('assistant', result.response);
+          memoryManager.displaySessionInfo();
+        } else {
+          appendMessage('assistant', `⚠️ ${result.error}`);
+        }
+      }
+    } catch (error) {
+      appendMessage('assistant', `⚠️ ${error.message}`);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+      toast.classList.add('fade-out');
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
   }
 
   function wireEvents() {
@@ -227,6 +465,9 @@
         if (memoryManager) {
           await memoryManager.clearSession();
         }
+        if (agentState) {
+          agentState.clearPendingRequest();
+        }
 
         const wrap = $("chat-messages");
         if (wrap) {
@@ -238,17 +479,21 @@
             </div>
           `;
         }
+
+        // Remove pending UI if present
+        const pendingUI = $('pending-request-ui');
+        if (pendingUI) pendingUI.remove();
+        $('chat-form').style.display = 'block';
       });
     }
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    initMemoryManager();
+    initManagers();
     setModelPill();
 
-    // If the unified UI manager is present, avoid wiring duplicate handlers
     if (window.uiManager && typeof window.uiManager.sendChatMessage === 'function') {
-      return; // app.js handles chat events
+      return;
     }
     wireEvents();
   });
