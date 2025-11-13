@@ -63,7 +63,7 @@ echo "=================================="
 # Pull the tinyllama model
 echo "Running: docker exec -it ollama ollama pull OLLAMA_LLM"
 docker exec ollama ollama pull llama3:latest
-docker exec ollama ollama pull gemma3:latest
+# docker exec ollama ollama pull gemma3:latest
 docker exec ollama ollama pull nomic-embed-text:latest
 echo ""
 echo "🎉 Setup complete!"

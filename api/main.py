@@ -1,7 +1,7 @@
 """
-Complete FastAPI wrapper for ControlTester_3000
+Complete FastAPI wrapper for ControlTester_3000 with Session & Memory Management
 File: api/main.py
-Includes both build_knowledge_base() and assess_evidence_with_kb() endpoints
+Includes session management, conversation memory, and enhanced chat capabilities
 """
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, status
@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from langchain_ollama import OllamaLLM, OllamaEmbeddings
+from langchain_community.vectorstores import FAISS
 from pydantic import BaseModel, Field, validator
 from typing import List, Optional, Dict, Any
 import tempfile
@@ -19,12 +20,16 @@ import traceback
 from pathlib import Path
 from utils.file_handlers import save_faiss_vectorstore, load_faiss_vectorstore
 
-# utils imports (leave unchanged in their folders)
+# utils imports
 from utils.llm_chain import build_knowledge_base, assess_evidence_with_kb, generate_executive_summary
 from utils.find_llm import get_ollama_model_names
 from langchain.schema import Document
-from utils.chat import chat_with_ai
+# REMOVED: from utils.chat import chat_with_ai  # This import was causing the error
 from utils.pdf_generator import generate_workbook
+
+# Add for session management
+from datetime import datetime
+import uuid
 
 # ----------------------------------------------------------------------------
 # Logging
@@ -44,13 +49,15 @@ logger = logging.getLogger(__name__)
 # ----------------------------------------------------------------------------
 app = FastAPI(
     title="ControlTester 3000 API",
-    version="2.1.0",
-    description="Cybersecurity audit service with knowledge base building and evidence assessment capabilities using LangChain & Ollama.",
+    version="2.2.0",
+    description="Cybersecurity audit service with memory management, session handling, and multi-source context integration.",
     openapi_tags=[
         {"name": "meta", "description": "API information and health checks"},
         {"name": "models", "description": "Available language models"},
         {"name": "knowledge-base", "description": "Knowledge base creation"},
-        {"name": "assessment", "description": "Evidence assessment and audit analysis"}
+        {"name": "assessment", "description": "Evidence assessment and audit analysis"},
+        {"name": "chat", "description": "Chat with memory and context"},
+        {"name": "session", "description": "Session management"}
     ]
 )
 
@@ -73,12 +80,78 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ============================================================================
+# SESSION & MEMORY MANAGEMENT
+# ============================================================================
+
+class SessionMemory:
+    """
+    Manages conversation memory per session.
+    Each client gets a unique session_id and isolated memory.
+    """
+    def __init__(self):
+        self.sessions: Dict[str, Dict[str, Any]] = {}
+
+    def create_session(self, session_id: str = None) -> str:
+        """Create a new session with isolated memory"""
+        if not session_id:
+            session_id = str(uuid.uuid4())
+
+        if session_id not in self.sessions:
+            self.sessions[session_id] = {
+                'created_at': datetime.now().isoformat(),
+                'message_count': 0,
+                'chat_history': [],
+                'conversation_vectorstore': None,
+                'last_activity': datetime.now().isoformat()
+            }
+            logger.info(f"Created new session: {session_id}")
+
+        return session_id
+
+    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get session data"""
+        return self.sessions.get(session_id)
+
+    def add_message(self, session_id: str, role: str, content: str):
+        """Add message to session history"""
+        if session_id not in self.sessions:
+            self.create_session(session_id)
+
+        self.sessions[session_id]['chat_history'].append({
+            'role': role,
+            'content': content,
+            'timestamp': datetime.now().isoformat()
+        })
+        self.sessions[session_id]['message_count'] += 1
+        self.sessions[session_id]['last_activity'] = datetime.now().isoformat()
+
+    def get_recent_history(self, session_id: str, k: int = 10) -> List[Dict]:
+        """Get recent k messages from session"""
+        session = self.get_session(session_id)
+        if not session:
+            return []
+        return session['chat_history'][-k*2:]  # Get last k exchanges (user + assistant)
+
+    def clear_session(self, session_id: str):
+        """Clear session memory"""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+            logger.info(f"Cleared session: {session_id}")
+
+    def update_vectorstore(self, session_id: str, vectorstore):
+        """Update conversation vectorstore for session"""
+        if session_id in self.sessions:
+            self.sessions[session_id]['conversation_vectorstore'] = vectorstore
+
+# Global session manager
+session_manager = SessionMemory()
+
 # ----------------------------------------------------------------------------
 # Config & Helpers
 # ----------------------------------------------------------------------------
 class _Cfg:
     MAX_FILE_SIZE = 1024 * 1024 * 1024 
-    # SUPPORTED_EXT = {".txt", ".pdf", ".doc", ".docx", ".md", ".csv", ".xlsx"}
     MAX_FILES = None
     DEFAULT_BATCH = 15
     DEFAULT_DELAY = 0.2
@@ -140,17 +213,20 @@ class AssessmentResponse(BaseModel):
 class ChatRequest(BaseModel):
     selected_model: str = Field(..., description="Ollama model for chat")
     user_input: str = Field(..., description="User question or prompt")
+    session_id: Optional[str] = Field(None, description="Session ID for conversation continuity")
+    include_history: bool = Field(True, description="Whether to include conversation history")
     global_kb_path: Optional[str] = Field(None, description="Path to saved global FAISS KB")
     company_kb_path: Optional[str] = Field(None, description="Path to saved company FAISS KB")
     chat_kb_path: Optional[str] = Field(None, description="Path to saved chat attachments FAISS KB")
     evid_kb_path: Optional[str] = Field(None, description="Path to saved evidence FAISS KB")
-    embedding_model: Optional[str] = Field(None, description="Optional embedding model name to use for similarity checks")
+    embedding_model: Optional[str] = Field(None, description="Optional embedding model name")
 
 class ChatResponse(BaseModel):
     success: bool
-    prompt: Optional[str] = None
+    session_id: str
     response: Optional[str] = None
     error: Optional[str] = None
+    message_count: int = 0
     loaded_paths: Optional[Dict[str, Optional[str]]] = None
 
 # ----------------------------------------------------------------------------
@@ -161,9 +237,6 @@ def _validate_upload(file: UploadFile) -> List[str]:
     if not file.filename:
         errs.append("Missing filename")
         return errs
-    # ext = Path(file.filename).suffix.lower()
-    # if ext not in _Cfg.SUPPORTED_EXT:
-    #     errs.append(f"Unsupported file type '{ext}'")
     if file.size and file.size > _Cfg.MAX_FILE_SIZE:
         size_mb = file.size / 1024 / 1024
         max_mb = _Cfg.MAX_FILE_SIZE / 1024 / 1024
@@ -184,7 +257,12 @@ async def root():
             "build_kb": "/build-knowledge-base",
             "assess": "/assess-evidence",
             "summary": "/generate-summary",
-            "models": "/models"
+            "models": "/models",
+            "chat": "/chat",
+            "session_create": "/session/create",
+            "session_info": "/session/{session_id}",
+            "session_clear": "/session/{session_id}",
+            "session_history": "/session/{session_id}/history"
         }
     }
 
@@ -193,7 +271,8 @@ async def health():
     return {
         "status": "ok",
         "uptime_seconds": time.time() - app_start,
-        "requests": request_counter
+        "requests": request_counter,
+        "active_sessions": len(session_manager.sessions)
     }
 
 @app.get("/models", tags=["models"], summary="Available Ollama models")
@@ -204,32 +283,89 @@ async def models():
     except Exception as e:
         raise HTTPException(500, f"Failed fetching models: {e}")
 
-# ----------------------------------------------------------------------------
-# Chat Endpoint
-# ----------------------------------------------------------------------------
-@app.post("/chat", response_model=ChatResponse, tags=["meta"], summary="Chat with the cybersecurity assistant")
-async def chat(request: ChatRequest):
-    rid = _req_id()
-    logger.info(f"[{rid}] Chat request using model {request.selected_model}")
+# ============================================================================
+# SESSION MANAGEMENT ENDPOINTS
+# ============================================================================
 
+@app.post("/session/create", tags=["session"])
+async def create_session():
+    """Create a new chat session"""
+    session_id = session_manager.create_session()
+    return {"session_id": session_id, "created_at": datetime.now().isoformat()}
+
+@app.get("/session/{session_id}", tags=["session"])
+async def get_session_info(session_id: str):
+    """Get session information"""
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+
+    return {
+        "session_id": session_id,
+        "created_at": session['created_at'],
+        "message_count": session['message_count'],
+        "last_activity": session['last_activity'],
+        "has_vectorstore": session['conversation_vectorstore'] is not None
+    }
+
+@app.delete("/session/{session_id}", tags=["session"])
+async def clear_session(session_id: str):
+    """Clear session memory"""
+    session_manager.clear_session(session_id)
+    return {"success": True, "message": f"Session {session_id} cleared"}
+
+@app.get("/session/{session_id}/history", tags=["session"])
+async def get_session_history(session_id: str, limit: int = 50):
+    """Get session conversation history"""
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+
+    history = session['chat_history'][-limit:]
+    return {"session_id": session_id, "messages": history, "total": len(history)}
+
+# ============================================================================
+# ENHANCED CHAT ENDPOINT WITH MEMORY
+# ============================================================================
+
+@app.post("/chat", response_model=ChatResponse, tags=["chat"], summary="Chat with memory")
+async def chat_with_memory(request: ChatRequest):
+    """
+    Enhanced chat endpoint with conversation memory.
+    Maintains per-session history and semantic retrieval.
+    """
+    rid = _req_id()
+    logger.info(f"[{rid}] Chat request - model: {request.selected_model}, session: {request.session_id}")
+
+    # Validate input
     try:
         request.selected_model = request.selected_model.strip()
         request.user_input = request.user_input.strip()
-        # Default paths if not provided by client
-        request.global_kb_path = request.global_kb_path or "saved_global_vectorstore"
-        request.company_kb_path = request.company_kb_path or "saved_company_vectorstore"
-        request.chat_kb_path = request.chat_kb_path or "chat_attachment_vectorstore"
         if not request.selected_model or not request.user_input:
             raise ValueError("selected_model and user_input are required")
     except Exception as e:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
 
+    # Create or get session
+    session_id = request.session_id or session_manager.create_session()
+    session = session_manager.get_session(session_id)
+    if not session:
+        session_id = session_manager.create_session(session_id)
+        session = session_manager.get_session(session_id)
+
+    # Setup paths
+    request.global_kb_path = request.global_kb_path or "saved_global_vectorstore"
+    request.company_kb_path = request.company_kb_path or "saved_company_vectorstore"
+    request.chat_kb_path = request.chat_kb_path or "chat_attachment_vectorstore"
+
     base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
     embed_name = request.embedding_model or os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
     embeddings_for_load = OllamaEmbeddings(model=embed_name, base_url=base_url)
 
+    # Load vectorstores
     loaded_stores: Dict[str, Any] = {"global": None, "company": None, "evidence": None, "chat": None}
     loaded_paths: Dict[str, Optional[str]] = {"global": None, "company": None, "evidence": None, "chat": None}
+
     try:
         if request.global_kb_path and Path(request.global_kb_path).exists():
             loaded_stores['global'] = load_faiss_vectorstore(request.global_kb_path, embeddings_for_load)
@@ -243,32 +379,144 @@ async def chat(request: ChatRequest):
         if request.chat_kb_path and Path(request.chat_kb_path).exists():
             loaded_stores['chat'] = load_faiss_vectorstore(request.chat_kb_path, embeddings_for_load)
             loaded_paths['chat'] = request.chat_kb_path
+
+        # Use cached evidence if available
         if VECTORSTORE_CACHE["evidence"]:
             loaded_stores['evidence'] = VECTORSTORE_CACHE["evidence"]
             loaded_paths['evidence'] = "in-memory"
-    except FileNotFoundError as fe:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(fe))
     except Exception as e:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e))
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Vectorstore loading error: {e}")
 
-    embedding_instance = None
-    if request.embedding_model:
-        embedding_instance = OllamaEmbeddings(model=request.embedding_model, base_url=base_url)
+    # Get conversation history
+    conversation_history = ""
+    past_relevant_context = ""
 
+    if request.include_history:
+        # Get recent history
+        recent_messages = session_manager.get_recent_history(session_id, k=10)
+        if recent_messages:
+            conversation_history = "\n".join([
+                f"{msg['role']}: {msg['content']}" for msg in recent_messages
+            ])
+
+        # Get semantically relevant past exchanges
+        conv_vectorstore = session['conversation_vectorstore']
+        if conv_vectorstore:
+            try:
+                past_relevant = conv_vectorstore.similarity_search(request.user_input, k=3)
+                if past_relevant:
+                    past_relevant_context = "\n\n".join([doc.page_content for doc in past_relevant])
+            except Exception as e:
+                logger.error(f"Error retrieving from conversation vectorstore: {e}")
+
+    # Build enhanced prompt
     try:
-        prompt_obj, response_text = chat_with_ai(
-            kb_vectorstore=loaded_stores['global'],
-            company_kb_vectorstore=loaded_stores['company'],
-            evid_vectorstore=loaded_stores['evidence'],
-            chat_attachment_vectorstore=loaded_stores['chat'],
-            selected_model=request.selected_model,
-            user_input=request.user_input,
-            embedding_model=embedding_instance
+        # Get contexts from knowledge bases
+        def safe_search(store, query):
+            if store is None:
+                return []
+            try:
+                return store.similarity_search(query, k=3)
+            except Exception as e:
+                logger.error(f"Search error: {e}")
+                return []
+
+        kb_contexts = safe_search(loaded_stores['global'], request.user_input)
+        company_contexts = safe_search(loaded_stores['company'], request.user_input)
+        evid_contexts = safe_search(loaded_stores['evidence'], request.user_input)
+        chat_contexts = safe_search(loaded_stores['chat'], request.user_input)
+
+        kb_context = "\n\n".join([c.page_content for c in kb_contexts]) if kb_contexts else "No policy context"
+        company_context = "\n\n".join([c.page_content for c in company_contexts]) if company_contexts else "No company context"
+        evid_context = "\n\n".join([c.page_content for c in evid_contexts]) if evid_contexts else "No evidence context"
+        chat_context = "\n\n".join([c.page_content for c in chat_contexts]) if chat_contexts else "No chat attachments"
+
+        # Build prompt with all contexts
+        enhanced_prompt = f"""You are a highly capable cybersecurity assistant with comprehensive memory and context awareness.
+
+=== KNOWLEDGE SOURCES ===
+
+**Information Security Standards & Policies:**
+{kb_context}
+
+**Company-Specific Policies & Procedures:**
+{company_context}
+
+**Security Logs & Evidence:**
+{evid_context}
+
+**Chat File Attachments:**
+{chat_context}
+
+=== CONVERSATION CONTEXT ===
+
+**Recent Conversation History:**
+{conversation_history if conversation_history else "No previous conversation"}
+
+**Relevant Past Discussions:**
+{past_relevant_context if past_relevant_context else "No relevant past discussions"}
+
+=== CURRENT USER QUESTION ===
+{request.user_input}
+
+=== INSTRUCTIONS ===
+
+1. Use ALL available context to provide comprehensive answers
+2. Reference previous conversations when relevant ("As we discussed earlier...")
+3. Cite your sources (policies, company docs, evidence, past discussion)
+4. Maintain conversation continuity - build upon previous answers
+5. Be specific and actionable with concrete recommendations
+6. Acknowledge limitations if information is missing
+7. Maintain professional cybersecurity audit assistant tone
+
+Your comprehensive response:"""
+
+        # Get LLM response
+        llm = OllamaLLM(model=request.selected_model, base_url=base_url)
+        response_text = llm.invoke(enhanced_prompt)
+
+        # Save to session memory
+        session_manager.add_message(session_id, "user", request.user_input)
+        session_manager.add_message(session_id, "assistant", response_text)
+
+        # Update conversation vectorstore
+        conversation_text = f"""User Question: {request.user_input}
+
+Assistant Response: {response_text}
+
+Context: Exchange on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
+
+        if session['conversation_vectorstore'] is None:
+            session['conversation_vectorstore'] = FAISS.from_texts(
+                [conversation_text],
+                embeddings_for_load
+            )
+        else:
+            new_doc = [Document(
+                page_content=conversation_text,
+                metadata={'timestamp': datetime.now().isoformat()}
+            )]
+            session['conversation_vectorstore'].add_documents(new_doc)
+
+        session_manager.update_vectorstore(session_id, session['conversation_vectorstore'])
+
+        return ChatResponse(
+            success=True,
+            session_id=session_id,
+            response=response_text,
+            message_count=session['message_count'],
+            loaded_paths=loaded_paths
         )
-        prompt_str = getattr(prompt_obj, 'template', str(prompt_obj))
-        return ChatResponse(success=True, prompt=prompt_str, response=response_text, loaded_paths=loaded_paths)
+
     except Exception as e:
-        return ChatResponse(success=False, error=str(e), loaded_paths=loaded_paths)
+        logger.error(f"Chat error: {e}")
+        return ChatResponse(
+            success=False,
+            session_id=session_id,
+            error=str(e),
+            message_count=session.get('message_count', 0),
+            loaded_paths=loaded_paths
+        )
 
 # ----------------------------------------------------------------------------
 # Knowledge Base Building Endpoint
@@ -373,115 +621,6 @@ async def build_kb(
 # ----------------------------------------------------------------------------
 # Evidence Assessment Endpoint
 # ----------------------------------------------------------------------------
-# @app.post(
-#     "/assess-evidence",
-#     response_model=AssessmentResponse,
-#     tags=["assessment"],
-#     summary="Assess evidence files against knowledge bases"
-# )
-# async def assess_evidence(
-#     selected_model: str = Form(...),
-#     max_workers: int = Form(4),
-#     evidence_files: List[UploadFile] = File(...)    
-# ):   
-#     t0 = time.time()
-
-#     try:
-#         AssessmentRequest(selected_model=selected_model, max_workers=max_workers)
-#     except Exception as e:
-#         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
-
-#     if not evidence_files:
-#         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Evidence files are required")  
-    
-#     evidence_objs: List[Any] = []
-#     tmp_paths: List[str] = []       
-#     file_results: List[FileResult] = []
-#     base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
-#     embeddings_for_load = OllamaEmbeddings(model=selected_model, base_url=base_url)
-
-#     try:  
-#         for uf in evidence_files:
-#             start = time.time()
-#             ext = Path(uf.filename).suffix or ".tmp"
-#             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
-#             tmp.write(await uf.read())
-#             tmp.close()
-#             tmp_paths.append(tmp.name)
-#             fh = open(tmp.name, "rb")
-#             evidence_objs.append(fh)
-#             file_results.append(FileResult(
-#                 filename=uf.filename,
-#                 size_bytes=uf.size or 0,
-#                 status="saved",
-#                 processing_time=time.time() - start
-#             ))
-       
-#         global_vectorstore = load_faiss_vectorstore("saved_global_vectorstore", embeddings_for_load)
-#         if not global_vectorstore:
-#             raise HTTPException(status.HTTP_400_BAD_REQUEST, "global vectorstores are required")
-#         VECTORSTORE_CACHE["global"] = global_vectorstore        
-        
-#         company_vectorstore = load_faiss_vectorstore("saved_company_vectorstore", embeddings_for_load)
-#         if not company_vectorstore:
-#             raise HTTPException(status.HTTP_400_BAD_REQUEST, "company vectorstores are required")
-#         VECTORSTORE_CACHE["company"] = company_vectorstore
-        
-#         evidence_vectorstore = build_knowledge_base(
-#             files=evidence_objs,
-#             selected_model=selected_model,
-#             batch_size=_Cfg.DEFAULT_BATCH,
-#             delay_between_batches=_Cfg.DEFAULT_DELAY,
-#             max_retries=_Cfg.DEFAULT_RETRIES
-#         )
-#         VECTORSTORE_CACHE["evidence"] = evidence_vectorstore
-
-#         assessment_results = assess_evidence_with_kb(
-#             evidence_files=evidence_objs,
-#             kb_vectorstore=global_vectorstore,
-#             company_kb_vectorstore=company_vectorstore,
-#             selected_model=selected_model,
-#             max_workers=max_workers
-#         )
-
-#         assessment_summary = generate_executive_summary(assessment_results,selected_model)
-#         assessment_results.append(assessment_summary)
-#         workbook_path = generate_workbook(assessment_results, None)
-
-#         processing_summary = {
-#             "evidence_files": len(evidence_files),
-#             "evidence_documents": len(evidence_files),
-#             "assessment_results": len(assessment_results),
-#             "workbook_path": workbook_path,
-#             "global_vectors": getattr(global_vectorstore.index, "ntotal", 0),
-#             "company_vectors": getattr(company_vectorstore.index, "ntotal", 0),
-#             "processing_seconds": time.time() - t0,
-#             "model_used": selected_model,
-#             "max_workers": max_workers
-#         }
-
-#         return AssessmentResponse(
-#             success=True,
-#             message="Evidence assessment completed successfully",
-#             workbook_path=workbook_path,
-#             processing_summary=processing_summary
-#         )
-#     except Exception as e:
-#         return AssessmentResponse(
-#             success=False,
-#             message="Assessment failed",
-#             processing_summary={},
-#             error_details=str(e)
-#         )
-#     finally:
-#         for fh in evidence_objs:
-#             try: fh.close()
-#             except Exception: pass
-#         for p in tmp_paths:
-#             try: os.unlink(p)
-#             except Exception: pass
-
-
 @app.post(
     "/assess-evidence",
     response_model=AssessmentResponse,
@@ -502,7 +641,7 @@ async def assess_evidence(
 
     if not evidence_files:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Evidence files are required")  
-    
+
     evidence_objs: List[Any] = []
     tmp_paths: List[str] = []       
     file_results: List[FileResult] = []
@@ -519,18 +658,17 @@ async def assess_evidence(
             tmp.write(content)
             tmp.close()
             tmp_paths.append(tmp.name)
-            
+
             # Create a file-like object that save_and_load_files expects
-            # Instead of opening as binary, create an object with .name and .read() method
             class FileWrapper:
                 def __init__(self, filepath, filename):
                     self.name = filename  # Original filename for extension detection
                     self._path = filepath
-                
+
                 def read(self):
                     with open(self._path, 'rb') as f:
                         return f.read()
-            
+
             evidence_objs.append(FileWrapper(tmp.name, uf.filename))
             file_results.append(FileResult(
                 filename=uf.filename,
@@ -538,17 +676,17 @@ async def assess_evidence(
                 status="saved",
                 processing_time=time.time() - start
             ))
-       
+
         global_vectorstore = load_faiss_vectorstore("saved_global_vectorstore", embeddings_for_load)
         if not global_vectorstore:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "global vectorstores are required")
         VECTORSTORE_CACHE["global"] = global_vectorstore        
-        
+
         company_vectorstore = load_faiss_vectorstore("saved_company_vectorstore", embeddings_for_load)
         if not company_vectorstore:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "company vectorstores are required")
         VECTORSTORE_CACHE["company"] = company_vectorstore
-        
+
         evidence_vectorstore = build_knowledge_base(
             files=evidence_objs,
             selected_model=selected_model,
@@ -566,23 +704,10 @@ async def assess_evidence(
             selected_model=selected_model,
             max_workers=max_workers
         )
-        
+
         assessment_summary = generate_executive_summary(assessment_results,selected_model)
         assessment_results.append(assessment_summary)
         workbook_path = generate_workbook(assessment_results, None)
-
-        # Generate executive summary separately
-        # assessment_summary = generate_executive_summary(assessment_results, selected_model)
-        
-        # Create a proper structure for the workbook generator
-        # Don't directly append to assessment_results - create a new structure
-        # workbook_data = {
-        #     "assessments": assessment_results,
-        #     "executive_summary": assessment_summary
-        # }
-        
-        # # Generate workbook with the properly structured data
-        # workbook_path = generate_workbook(workbook_data, None)
 
         processing_summary = {
             "evidence_files": len(evidence_files),
@@ -616,7 +741,8 @@ async def assess_evidence(
         for p in tmp_paths:
             try: os.unlink(p)
             except Exception: pass
-# ---------------------------------------------------------------------------`-
+
+# ----------------------------------------------------------------------------
 # Executive Summary Endpoint
 # ----------------------------------------------------------------------------
 @app.post("/generate-summary", tags=["assessment"])

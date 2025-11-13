@@ -3681,3 +3681,30 @@ select.form-control {
   align-items: center;
   gap: var(--space-6);
 }
+/* Session Info Container */
+.session-info-container {
+  padding: 8px 12px;
+  background: rgba(0, 51, 141, 0.05);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+
+.session-badge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.85rem;
+}
+
+.session-id {
+  color: #00338d;
+  font-weight: 500;
+}
+
+.message-count {
+  color: #666;
+  padding: 2px 8px;
+  background: white;
+  border-radius: 12px;
+  font-size: 0.8rem;
+}

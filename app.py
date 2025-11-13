@@ -9,6 +9,10 @@ from utils.chat import chat_with_bot
 import base64
 from langchain_community.vectorstores import FAISS
 from langchain_ollama import OllamaEmbeddings
+from langchain.memory import ConversationBufferWindowMemory, ConversationSummaryBufferMemory
+from langchain_community.chat_message_histories import StreamlitChatMessageHistory
+from datetime import datetime
+from langchain.schema import Document
 import json
 import utils.llm_chain as llm_chain
 
@@ -43,6 +47,78 @@ MODELS_PATH = "models"
 @st.cache_data(ttl=60)  # Cache for 60 seconds to avoid frequent API calls
 def get_ollama_models():
     return _ollama_models()
+
+def initialize_conversation_memory():
+    """
+    Initialize all memory systems for the chat.
+    This runs once when the app starts.
+    """
+
+    # 1. LangChain conversation memory - keeps last K exchanges
+    if 'conversation_memory' not in st.session_state:
+        logger.info("Initializing conversation memory")
+        message_history = StreamlitChatMessageHistory(key="chat_messages_history")
+        st.session_state['conversation_memory'] = ConversationBufferWindowMemory(
+            chat_memory=message_history,
+            k=10,  # Keep last 10 message pairs
+            return_messages=True,
+            memory_key="chat_history",
+            input_key="input",
+            output_key="output"
+        )
+
+    # 2. Conversation vectorstore for semantic retrieval
+    if 'conversation_vectorstore' not in st.session_state:
+        st.session_state['conversation_vectorstore'] = None
+        logger.info("Conversation vectorstore initialized as None")
+
+    # 3. Enhanced chat history with metadata
+    if 'enhanced_chat_history' not in st.session_state:
+        st.session_state['enhanced_chat_history'] = []
+        st.session_state['chat_metadata'] = {
+            'session_id': datetime.now().strftime('%Y%m%d_%H%M%S'),
+            'total_messages': 0,
+            'session_start': datetime.now().isoformat()
+        }
+        logger.info(f"Enhanced chat history initialized for session: {st.session_state['chat_metadata']['session_id']}")
+
+def clear_all_memory():
+    """Clear all memory systems"""
+    logger.info("Clearing all memory systems")
+
+    # Clear LangChain memory
+    if 'conversation_memory' in st.session_state:
+        st.session_state['conversation_memory'].clear()
+
+    # Clear conversation vectorstore
+    st.session_state['conversation_vectorstore'] = None
+
+    # Clear enhanced history
+    st.session_state['enhanced_chat_history'] = []
+    st.session_state['chat_metadata']['total_messages'] = 0
+
+    # Clear old chat history (backward compatibility)
+    st.session_state['chat_history'] = []
+
+    logger.info("All memory systems cleared")
+
+def add_message_to_enhanced_history(role, content, metadata=None):
+    """Add message to enhanced chat history with full metadata"""
+    message = {
+        'role': role,
+        'content': content,
+        'timestamp': datetime.now().isoformat(),
+        'message_id': st.session_state['chat_metadata']['total_messages'],
+        'metadata': metadata or {}
+    }
+
+    st.session_state['enhanced_chat_history'].append(message)
+    st.session_state['chat_metadata']['total_messages'] += 1
+
+    logger.info(f"Added {role} message #{message['message_id']} to enhanced history")
+
+# Initialize memory at module level
+initialize_conversation_memory()
 
 st.set_page_config(page_title="Control Risk Audit Bot", layout="wide")
 with open("kpmg_logo.png", "rb") as logo_file:
@@ -402,14 +478,61 @@ else:
 
 # --- Step 4: Chat with the Bot ---
 
-with st.expander("4️⃣ Chat with the agent", expanded=True): 
-     # Get available models
+with st.expander("4️⃣ Chat with the agent", expanded=True):
     if model_disabled:
-        st.toast(f"Currently selected model: **{selected_model}**") 
+        st.toast(f"Currently selected model: **{selected_model}**")
 
     st.subheader("Chat with the Audit Bot")
-    chat_with_bot(st.session_state['kb_vectorstore'], st.session_state['company_kb_vectorstore'], st.session_state['assessment'], st.session_state['evid_vectorstore'], None, st.session_state['selected_model'])
+
+    # Display conversation statistics
+    if st.session_state['chat_metadata']['total_messages'] > 0:
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Messages", st.session_state['chat_metadata']['total_messages'])
+        with col2:
+            session_id = st.session_state['chat_metadata']['session_id'][-8:]
+            st.metric("Session", session_id)
+        with col3:
+            context_count = sum([
+                st.session_state.get('kb_ready', False),
+                st.session_state.get('company_files_ready', False),
+                st.session_state.get('evidence_kb_ready', False)
+            ])
+            st.metric("Context Sources", f"{context_count}/3")
+
+    # Call enhanced chat function
+    chat_with_bot(
+        st.session_state['kb_vectorstore'],
+        st.session_state['company_kb_vectorstore'],
+        st.session_state['assessment'],
+        st.session_state['evid_vectorstore'],
+        None,
+        st.session_state['selected_model']
+    )
+
+    # Show contextual information
     if st.session_state.get('assessment_done') or st.session_state.get('kb_ready') or st.session_state.get('company_files_ready'):
-        st.info("You can now ask questions about your audit and files. The bot will assist you based on the knowledge base and processed files.")
+        st.info("💡 The bot has access to conversation history and can reference previous discussions.")
     else:
         st.warning("Please upload policies and files, then train the bot to start chatting.")
+
+    # Display memory statistics in expander
+    if st.session_state['chat_metadata']['total_messages'] > 0:
+        with st.expander("📊 Memory Statistics", expanded=False):
+            st.write("**Session Information:**")
+            st.json(st.session_state['chat_metadata'])
+
+            # Show memory contents
+            if 'conversation_memory' in st.session_state:
+                try:
+                    memory_vars = st.session_state['conversation_memory'].load_memory_variables({})
+                    st.write("**Loaded Memory Variables:**")
+                    st.write(f"History length: {len(str(memory_vars.get('chat_history', '')))} characters")
+                except Exception as e:
+                    st.write(f"Memory status: {str(e)}")
+
+            # Show vectorstore status
+            if st.session_state['conversation_vectorstore']:
+                st.write(f"**Conversation Vectorstore:** {st.session_state['conversation_vectorstore'].index.ntotal} vectors")
+            else:
+                st.write("**Conversation Vectorstore:** Not yet created")

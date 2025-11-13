@@ -1,7 +1,19 @@
-/* Lightweight chat integration (no changes to existing app.js) */
+/* Enhanced chat integration with memory management */
 (function () {
+  // Initialize memory manager
+  let memoryManager = null;
 
   function $(id) { return document.getElementById(id); }
+
+  function initMemoryManager() {
+    if (window.ChatMemoryManager) {
+      memoryManager = new window.ChatMemoryManager();
+      memoryManager.displaySessionInfo();
+      console.log('Memory manager initialized');
+    } else {
+      console.warn('ChatMemoryManager not loaded');
+    }
+  }
 
   function setModelPill() {
     const el = $("chat-active-model");
@@ -150,30 +162,41 @@
     setSending(true);
 
     try {
-      const chatPath = sessionStorage.getItem("chatAttachmentPath");
-      const res = await fetch("http://localhost:8000/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selected_model: model,
-          user_input: text,
-          ...(chatPath ? { chat_kb_path: chatPath } : {})
-          // server automatically loads saved vectorstores if present
-        })
-      });
+      let result;
 
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`HTTP ${res.status}: ${errText}`);
-      }
+      if (memoryManager) {
+        // Use memory manager for enhanced context
+        result = await memoryManager.sendMessage(text, model);
 
-      const data = await res.json();
-
-      if (data && data.success && data.response) {
-        appendMessage("assistant", data.response);
+        if (result.success) {
+          appendMessage("assistant", result.response);
+          memoryManager.displaySessionInfo();
+        } else {
+          appendMessage("assistant", `⚠️ ${result.error}`);
+        }
       } else {
-        const msg = data?.error || "No response from assistant.";
-        appendMessage("assistant", msg);
+        // Fallback to original implementation
+        const chatPath = sessionStorage.getItem("chatAttachmentPath");
+        const res = await fetch("http://localhost:8000/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            selected_model: model,
+            user_input: text,
+            ...(chatPath ? { chat_kb_path: chatPath } : {})
+          })
+        });
+
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        if (data && data.success && data.response) {
+          appendMessage("assistant", data.response);
+        } else {
+          appendMessage("assistant", data?.error || "No response");
+        }
       }
     } catch (err) {
       appendMessage("assistant", `⚠️ ${err.message || err}`);
@@ -187,7 +210,9 @@
     const form = $("chat-form");
     const input = $("chat-input");
     const clearBtn = $("chat-clear");
+
     if (form) form.addEventListener("submit", sendMessage);
+
     if (input) {
       input.addEventListener("keydown", (e) => {
         if (e.key === "Enter" && !e.shiftKey) {
@@ -196,21 +221,31 @@
         }
       });
     }
+
     if (clearBtn) {
-      clearBtn.addEventListener("click", () => {
+      clearBtn.addEventListener("click", async () => {
+        if (memoryManager) {
+          await memoryManager.clearSession();
+        }
+
         const wrap = $("chat-messages");
-        if (wrap) wrap.innerHTML = `
-          <div class="chat-empty">
-            <div class="placeholder-icon">💬</div>
-            <h3>Start chatting with your documents</h3>
-            <p>Type a question below. The assistant will use your saved vectorstores if available.</p>
-          </div>`;
+        if (wrap) {
+          wrap.innerHTML = `
+            <div class="chat-empty">
+              <div class="placeholder-icon">💬</div>
+              <h3>Start chatting with your documents</h3>
+              <p>Your conversation history is maintained for better context.</p>
+            </div>
+          `;
+        }
       });
     }
   }
 
   document.addEventListener("DOMContentLoaded", () => {
+    initMemoryManager();
     setModelPill();
+
     // If the unified UI manager is present, avoid wiring duplicate handlers
     if (window.uiManager && typeof window.uiManager.sendChatMessage === 'function') {
       return; // app.js handles chat events
