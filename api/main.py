@@ -469,9 +469,17 @@ async def chat_with_memory(request: ChatRequest):
     """
     Enhanced chat endpoint with conversation memory.
     Maintains per-session history and semantic retrieval.
+
+    ALL BUSINESS LOGIC IS DELEGATED TO utils/chat.py
+    This endpoint only handles HTTP concerns: validation, session mgmt, error handling
     """
     rid = _req_id()
     logger.info(f"[{rid}] Chat request - model: {request.selected_model}, session: {request.session_id}")
+
+    # ========================================================================
+    # IMPORT CHAT LOGIC FROM utils/chat.py
+    # ========================================================================
+    from utils.chat import chat_with_ai_with_memory, update_conversation_vectorstore_api
 
     # Validate input
     try:
@@ -498,9 +506,7 @@ async def chat_with_memory(request: ChatRequest):
     embed_name = request.embedding_model or os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
     embeddings_for_load = OllamaEmbeddings(model=embed_name, base_url=base_url)
 
-    # ============================================================================
-    # STEP 1: CREATE loaded_stores FIRST (FIX FOR UnboundLocalError)
-    # ============================================================================
+    # Load vectorstores
     loaded_stores: Dict[str, Any] = {"global": None, "company": None, "evidence": None, "chat": None}
     loaded_paths: Dict[str, Optional[str]] = {"global": None, "company": None, "evidence": None, "chat": None}
 
@@ -525,201 +531,38 @@ async def chat_with_memory(request: ChatRequest):
     except Exception as e:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Vectorstore loading error: {e}")
 
-    # ============================================================================
-    # STEP 2: NOW RUN PHASE 2 VALIDATION (AFTER loaded_stores exists)
-    # ============================================================================
-    kb_loaded = bool(loaded_stores.get('global'))
-    company_loaded = bool(loaded_stores.get('company'))
-    evidence_loaded = bool(loaded_stores.get('evidence'))
-
-    query_lower = request.user_input.lower()
-
-    # Expanded keyword detection for better accuracy
-    needs_kb = any(w in query_lower for w in [
-        'policy', 'policies', 'standard', 'standards', 'compliance', 
-        'regulation', 'framework', 'guideline', 'requirement', 'iso', 
-        'nist', 'control', 'governance'
-    ])
-    needs_evidence = any(w in query_lower for w in [
-        'assess', 'audit', 'test', 'verify', 'evidence', 'log', 'logs', 
-        'analyze', 'review', 'check', 'examine', 'investigate', 'scan',
-        'finding', 'vulnerability', 'incident'
-    ])
-    needs_company = any(w in query_lower for w in [
-        'company', 'organization', 'soc', 'soc2', 'cri', 'profile',
-        'specific', 'our', 'internal', 'organizational', 'entity'
-    ])
-
-    # Build detailed missing context information
-    missing_contexts = []
-    if needs_kb and not kb_loaded:
-        missing_contexts.append({
-            'type': 'Security Policies & Standards',
-            'description': 'information security policies, standards, and frameworks',
-            'examples': 'ISO 27001, NIST CSF, COBIT, internal security policies, compliance frameworks',
-            'formats': 'PDF, TXT, DOCX, XLSX',
-            'kb_type': 'global',
-            'emoji': '📋'
-        })
-    if needs_evidence and not evidence_loaded:
-        missing_contexts.append({
-            'type': 'Evidence & Logs',
-            'description': 'security logs, audit evidence, or system outputs',
-            'examples': 'access logs, firewall logs, SIEM reports, configuration files, vulnerability scans',
-            'formats': 'LOG, TXT, CSV, PDF, JSON, XML',
-            'kb_type': 'evidence',
-            'emoji': '🔍'
-        })
-    if needs_company and not company_loaded:
-        missing_contexts.append({
-            'type': 'Company Documents',
-            'description': 'company-specific documentation and reports',
-            'examples': 'SOC 2 reports, CRI profiles, organizational policies, risk assessments',
-            'formats': 'PDF, TXT, DOCX, XLSX',
-            'kb_type': 'company',
-            'emoji': '🏢'
-        })
-
-    # If context is missing, respond with helpful guidance IN THE CHAT
-    if missing_contexts:
-        response_message = f"""**📋 Missing Required Context**"""
-
-    # ============================================================================
-    # STEP 3: Continue with normal chat processing
-    # ============================================================================
-
-    # Get conversation history
-    conversation_history = ""
-    past_relevant_context = ""
-
-    if request.include_history:
-        # Get recent history
-        recent_messages = session_manager.get_recent_history(session_id, k=10)
-        if recent_messages:
-            conversation_history = "\n".join([
-                f"{msg['role']}: {msg['content']}" for msg in recent_messages
-            ])
-
-        # Get semantically relevant past exchanges
-        conv_vectorstore = session['conversation_vectorstore']
-        if conv_vectorstore:
-            try:
-                past_relevant = conv_vectorstore.similarity_search(request.user_input, k=3)
-                if past_relevant:
-                    past_relevant_context = "\n\n".join([doc.page_content for doc in past_relevant])
-            except Exception as e:
-                logger.error(f"Error retrieving from conversation vectorstore: {e}")
-
-    # Build enhanced prompt
     try:
-        # Get contexts from knowledge bases
-        def safe_search(store, query):
-            if store is None:
-                return []
-            try:
-                return store.similarity_search(query, k=3)
-            except Exception as e:
-                logger.error(f"Search error: {e}")
-                return []
-
-        kb_contexts = safe_search(loaded_stores['global'], request.user_input)
-        company_contexts = safe_search(loaded_stores['company'], request.user_input)
-        evid_contexts = safe_search(loaded_stores['evidence'], request.user_input)
-        chat_contexts = safe_search(loaded_stores['chat'], request.user_input)
-
-        kb_context = "\n\n".join([c.page_content for c in kb_contexts]) if kb_contexts else "No policy context"
-        company_context = "\n\n".join([c.page_content for c in company_contexts]) if company_contexts else "No company context"
-        evid_context = "\n\n".join([c.page_content for c in evid_contexts]) if evid_contexts else "No evidence context"
-        chat_context = "\n\n".join([c.page_content for c in chat_contexts]) if chat_contexts else "No chat attachments"
-
-        # Build prompt with all contexts (Phase 2 enhanced)
-        enhanced_prompt = f"""You are a highly capable cybersecurity audit and analysis assistant with comprehensive memory and context awareness.
-
-You have been designed to provide accurate, actionable guidance based on available information. If you lack necessary context, you should clearly state what is missing rather than guessing.
-
-=== KNOWLEDGE SOURCES ===
-
-**Information Security Standards & Policies:**
-{kb_context}
-
-**Company-Specific Policies & Procedures:**
-{company_context}
-
-**Security Logs & Evidence:**
-{evid_context}
-
-**Chat File Attachments:**
-{chat_context}
-
-=== CONVERSATION CONTEXT ===
-
-**Recent Conversation History:**
-{conversation_history if conversation_history else "No previous conversation"}
-
-**Relevant Past Discussions:**
-{past_relevant_context if past_relevant_context else "No relevant past discussions"}
-
-=== CURRENT USER QUESTION ===
-{request.user_input}
-
-=== INSTRUCTIONS ===
-
-**Context-Aware Responding:**
-1. Use ALL available context to provide the most comprehensive answer possible
-2. Reference previous conversations when relevant (e.g., "As we discussed earlier...")
-3. Cite your sources by mentioning which context you're using (policies, company docs, evidence, past discussion)
-4. Maintain conversation continuity - build upon previous answers for follow-up questions
-
-**Quality Guidelines:**
-5. Be specific and actionable with concrete recommendations
-6. Use bullet points, numbered lists, and tables where appropriate
-7. Provide examples when explaining concepts
-8. If information is partially available, answer what you can and note what's missing
-9. Always validate if Chat File Attachments are relevant to the context or user input, if not say why it is not relevant and stop further processing.
-
-**Professional Standards:**
-10. Maintain a professional cybersecurity audit assistant tone
-11. Acknowledge limitations - if critical information is missing, state it clearly
-12. Never hallucinate or invent information
-13. When unsure, ask clarifying questions or suggest next steps
-
-**Response Format:**
-- For policy questions: Quote relevant sections and provide interpretation
-- For assessments: Provide structured analysis with findings and recommendations
-- For comparisons: Use tables to show differences
-- For follow-ups: Build on previous context seamlessly
-- For small talk: Reply with very small generic replies
-
-Your comprehensive response:"""
-
-        # Get LLM response
-        llm = OllamaLLM(model=request.selected_model, base_url=base_url)
-        response_text = llm.invoke(enhanced_prompt)
+        # ========================================================================
+        # CALL THE MAIN CHAT LOGIC FROM utils/chat.py
+        # All prompt construction, LLM invocation, and context handling happens here
+        # ========================================================================
+        response_text = chat_with_ai_with_memory(
+            kb_vectorstore=loaded_stores['global'],
+            company_kb_vectorstore=loaded_stores['company'],
+            evid_vectorstore=loaded_stores['evidence'],
+            chat_attachment_vectorstore=loaded_stores['chat'],
+            selected_model=request.selected_model,
+            user_input=request.user_input,
+            session_manager=session_manager,
+            session_id=session_id,
+            embedding_model=embeddings_for_load,
+            include_history=request.include_history
+        )
 
         # Save to session memory
         session_manager.add_message(session_id, "user", request.user_input)
         session_manager.add_message(session_id, "assistant", response_text)
 
-        # Update conversation vectorstore
-        conversation_text = f"""User Question: {request.user_input}
-
-Assistant Response: {response_text}
-
-Context: Exchange on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"""
-
-        if session['conversation_vectorstore'] is None:
-            session['conversation_vectorstore'] = FAISS.from_texts(
-                [conversation_text],
-                embeddings_for_load
-            )
-        else:
-            new_doc = [Document(
-                page_content=conversation_text,
-                metadata={'timestamp': datetime.now().isoformat()}
-            )]
-            session['conversation_vectorstore'].add_documents(new_doc)
-
-        session_manager.update_vectorstore(session_id, session['conversation_vectorstore'])
+        # ========================================================================
+        # UPDATE CONVERSATION VECTORSTORE USING UTILITY FUNCTION
+        # ========================================================================
+        update_conversation_vectorstore_api(
+            user_input=request.user_input,
+            bot_response=response_text,
+            session_manager=session_manager,
+            session_id=session_id,
+            embedding_model=embeddings_for_load
+        )
 
         return ChatResponse(
             success=True,

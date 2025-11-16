@@ -532,9 +532,10 @@ with st.expander("4️⃣ Chat with the agent", expanded=True):
     else:
         st.warning("Please upload policies and files, then train the bot to start chatting.")
 
-    # Display memory statistics in expander
+    # ✅ FIXED: Use st.container instead of st.expander
     if st.session_state['chat_metadata']['total_messages'] > 0:
-        with st.expander("📊 Memory Statistics", expanded=False):
+        with st.container(border=True):  # Changed from st.expander()
+            st.write("📊 **Memory Statistics**")
             st.write("**Session Information:**")
             st.json(st.session_state['chat_metadata'])
 

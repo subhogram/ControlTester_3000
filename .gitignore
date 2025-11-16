@@ -6,3 +6,4 @@ THINGS_TODO.txt
 utils/__pycache__/
 audit_pipeline.log
 .vscode/
+.node_modules/
