@@ -1,5 +1,5 @@
 import { useState, useRef, KeyboardEvent } from "react";
-import { Paperclip, Send } from "lucide-react";
+import { Paperclip, ArrowUp, Plus, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -44,9 +44,9 @@ export default function ChatInput({
   };
 
   return (
-    <div className="border-t bg-background p-4">
+    <div className="bg-background p-4">
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-center gap-2 border rounded-2xl bg-card p-2 hover-highlight">
+        <div className="bg-card/80 backdrop-blur-sm rounded-3xl p-4 border border-border/50 shadow-lg">
           <input
             ref={fileInputRef}
             type="file"
@@ -56,35 +56,58 @@ export default function ChatInput({
             data-testid="input-file"
           />
           
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleFileClick}
-            className="flex-shrink-0 self-start"
-            data-testid="button-attach"
-          >
-            <Paperclip className="h-5 w-5" />
-          </Button>
-
           <Textarea
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Type a message..."
-            className="resize-none border-0 bg-transparent focus-visible:ring-0 shadow-none min-h-[40px] max-h-[200px] py-2"
+            placeholder="Ask Agent-Assess to help with your cybersecurity assessment..."
+            className="resize-none border-0 bg-transparent focus-visible:ring-0 shadow-none min-h-[60px] max-h-[200px] text-base placeholder:text-muted-foreground/60 mb-3"
             disabled={disabled}
             data-testid="input-message"
           />
 
-          <Button
-            onClick={handleSend}
-            disabled={!message.trim() || disabled}
-            size="icon"
-            className="flex-shrink-0 self-start"
-            data-testid="button-send"
-          >
-            <Send className="h-5 w-5" />
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-full hover-elevate"
+              data-testid="button-plus"
+            >
+              <Plus className="h-5 w-5" />
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleFileClick}
+              className="gap-2 h-9 rounded-full hover-elevate"
+              data-testid="button-attach"
+            >
+              <Paperclip className="h-4 w-4" />
+              <span className="text-sm">Attach</span>
+            </Button>
+
+            <div className="flex-1" />
+
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-9 w-9 rounded-full hover-elevate"
+              data-testid="button-mic"
+            >
+              <Mic className="h-5 w-5" />
+            </Button>
+
+            <Button
+              onClick={handleSend}
+              disabled={!message.trim() || disabled}
+              size="icon"
+              className="h-9 w-9 rounded-full"
+              data-testid="button-send"
+            >
+              <ArrowUp className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>
