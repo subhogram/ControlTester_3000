@@ -1,4 +1,4 @@
-import { useState, useRef, KeyboardEvent, useEffect } from "react";
+import { useState, useRef, KeyboardEvent, useEffect, useCallback } from "react";
 import { Paperclip, ArrowUp, Plus, Mic, X, FileText, CheckCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -37,31 +37,31 @@ export default function ChatInput({
     }
   }, [message]);
 
-  const handleSend = () => {
+  const handleSend = useCallback(() => {
     if (message.trim() && !disabled) {
       onSendMessage(message);
       setMessage("");
     }
-  };
+  }, [message, disabled, onSendMessage]);
 
-  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+  const handleKeyDown = useCallback((e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-  };
+  }, [handleSend]);
 
-  const handleFileClick = () => {
+  const handleFileClick = useCallback(() => {
     fileInputRef.current?.click();
-  };
+  }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFiles = e.target.files;
     if (selectedFiles && selectedFiles.length > 0) {
       onFileSelect(Array.from(selectedFiles));
       e.target.value = "";
     }
-  };
+  }, [onFileSelect]);
 
   return (
     <div className="p-4">
