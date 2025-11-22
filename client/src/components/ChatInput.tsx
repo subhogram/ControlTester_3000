@@ -1,4 +1,4 @@
-import { useState, useRef, KeyboardEvent } from "react";
+import { useState, useRef, KeyboardEvent, useEffect } from "react";
 import { Paperclip, ArrowUp, Plus, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -16,6 +16,15 @@ export default function ChatInput({
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea based on content (lovable.dev behavior)
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [message]);
 
   const handleSend = () => {
     if (message.trim() && !disabled) {
@@ -57,12 +66,13 @@ export default function ChatInput({
           />
           
           <Textarea
+            ref={textareaRef}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask Agent-Assess to help with your cybersecurity assessment..."
-            rows={2}
-            className="resize-none border-0 bg-transparent focus-visible:ring-0 shadow-none min-h-[60px] max-h-[200px] text-base placeholder:text-muted-foreground/60 mb-3 leading-relaxed"
+            rows={1}
+            className="resize-none border-0 bg-transparent focus-visible:ring-0 shadow-none min-h-[24px] max-h-[200px] text-base placeholder:text-muted-foreground/60 mb-3 overflow-hidden"
             disabled={disabled}
             data-testid="input-message"
           />
