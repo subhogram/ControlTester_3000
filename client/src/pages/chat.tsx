@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -7,8 +7,8 @@ import ChatHeader from "@/components/ChatHeader";
 import ChatMessages from "@/components/ChatMessages";
 import ChatInput from "@/components/ChatInput";
 import type { Message } from "@/types";
-import { buildKnowledgeBase, saveVectorstore, sendChatMessage, loadAllVectorstores } from "@/lib/chatHelpers";
-import { VECTORSTORE_PATHS, KB_TYPES } from "@/lib/constants";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function ChatPage() {
   const [, setLocation] = useLocation();
@@ -26,10 +26,37 @@ export default function ChatPage() {
 
   const uploadFilesMutation = useMutation({
     mutationFn: async ({ files, selected_model }: { files: File[]; selected_model: string }) => {
-      const result = await buildKnowledgeBase(files, selected_model, KB_TYPES.CHAT);
+      const formData = new FormData();
+      formData.append("selected_model", selected_model);
+      formData.append("batch_size", "15");
+      formData.append("delay_between_batches", "0.2");
+      formData.append("max_retries", "3");
+      formData.append("kb_type", "chat");
+
+      files.forEach((file) => formData.append("files", file));
+
+      const response = await fetch(`${API_URL}/build-knowledge-base`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.detail || "Failed to build knowledge base");
+      }
+
+      const result = await response.json();
       
       try {
-        await saveVectorstore(KB_TYPES.CHAT, VECTORSTORE_PATHS.CHAT);
+        const saveFormData = new URLSearchParams();
+        saveFormData.append("kb_type", "chat");
+        saveFormData.append("dir_path", "chat_attachment_vectorstore");
+
+        await fetch(`${API_URL}/save-vectorstore`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: saveFormData.toString(),
+        });
       } catch (saveError) {
         console.warn("Error saving chat vectorstore:", saveError);
       }
@@ -50,7 +77,30 @@ export default function ChatPage() {
       has_attachments: boolean;
       chat_history: Array<{role: string; content: string}>;
     }) => {
-      return await sendChatMessage(user_input, selected_model, has_attachments, chat_history);
+      const payload: any = {
+        selected_model,
+        user_input,
+        chat_history,
+        global_kb_path: "global_kb_vectorstore",
+        company_kb_path: "company_kb_vectorstore",
+      };
+      
+      if (has_attachments) {
+        payload.chat_kb_path = "chat_attachment_vectorstore";
+      }
+
+      const response = await fetch(`${API_URL}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Failed to get chat response");
+      }
+
+      return await response.json();
     },
     onError: (error: Error) => {
       toast({
@@ -135,10 +185,35 @@ export default function ChatPage() {
     }
 
     // Load all vectorstores into memory before chat
+    const loadVectorstore = async (dir_path: string, kb_type: string) => {
+      const formData = new URLSearchParams();
+      formData.append("dir_path", dir_path);
+      formData.append("kb_type", kb_type);
+      formData.append("model_name", selectedModel);
+
+      const response = await fetch(`${API_URL}/load-vectorstore`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: formData.toString(),
+      });
+
+      if (!response.ok) {
+        console.warn(`Failed to load ${kb_type} vectorstore from ${dir_path}`);
+      }
+    };
+
     try {
-      await loadAllVectorstores(selectedModel, currentHasAttachments);
+      const loads = [
+        loadVectorstore("global_kb_vectorstore", "global"),
+        loadVectorstore("company_kb_vectorstore", "company"),
+      ];
+      
+      if (currentHasAttachments) {
+        loads.push(loadVectorstore("chat_attachment_vectorstore", "chat"));
+      }
+      
+      await Promise.allSettled(loads);
     } catch (error) {
-      // Silently continue - vectorstores may not exist, which is OK
       console.log("Vectorstore loading info:", error);
     }
 
@@ -183,7 +258,7 @@ export default function ChatPage() {
       };
       setMessages((prev) => prev.map(msg => msg.id === loadingMessageId ? aiMessage : msg));
 
-      // Clear uploaded files after successful response
+      // Clear uploaded files after successful response (attachments are one-time use per message)
       setUploadedFiles([]);
       setHasAttachments(false);
     } catch (error) {
@@ -201,54 +276,42 @@ export default function ChatPage() {
     }
   };
 
-  const handleClearChat = useCallback(() => {
+  const handleClearChat = () => {
     clearChat();
     toast({
       title: "✓ Chat Cleared",
       description: "All messages and files have been cleared",
       className: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
     });
-  }, [clearChat, toast]);
+  };
 
-  const handleLogout = useCallback(() => {
+  const handleLogout = () => {
     console.log("Logout clicked");
-  }, []);
+  };
 
-  const handleFileSelect = useCallback((files: File[]) => {
-    setUploadedFiles((prev) => [...prev, ...files]);
-  }, [setUploadedFiles]);
-
-  const handleRemoveFile = useCallback((index: number) => {
-    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
-    if (uploadedFiles.length === 1) {
-      setHasAttachments(false);
-    }
-  }, [setUploadedFiles, uploadedFiles.length, setHasAttachments]);
-
-  const handleClearAllFiles = useCallback(() => {
-    setUploadedFiles([]);
-    setHasAttachments(false);
-  }, [setUploadedFiles, setHasAttachments]);
-
-  const chatInputProps = useMemo(() => ({
+  // Shared ChatInput props to reduce duplication
+  const chatInputProps = {
     onSendMessage: handleSendMessage,
-    onFileSelect: handleFileSelect,
+    onFileSelect: (files: File[]) => setUploadedFiles((prev) => [...prev, ...files]),
     disabled: chatMutation.isPending || isProcessingFiles,
     files: uploadedFiles,
-    onRemoveFile: handleRemoveFile,
-    onClearAllFiles: handleClearAllFiles,
+    onRemoveFile: (index: number) => {
+      setUploadedFiles((prev) => {
+        const newFiles = prev.filter((_, i) => i !== index);
+        // Update attachment status based on new array length
+        if (newFiles.length === 0) {
+          setHasAttachments(false);
+        }
+        return newFiles;
+      });
+    },
+    onClearAllFiles: () => {
+      setUploadedFiles([]);
+      setHasAttachments(false);
+    },
     isProcessing: isProcessingFiles,
     hasVectorstore: hasAttachments,
-  }), [
-    handleSendMessage,
-    handleFileSelect,
-    chatMutation.isPending,
-    isProcessingFiles,
-    uploadedFiles,
-    handleRemoveFile,
-    handleClearAllFiles,
-    hasAttachments,
-  ]);
+  };
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-[#654ea3]/20 via-[#8b6dbb]/10 to-[#eaafc8]/20">
