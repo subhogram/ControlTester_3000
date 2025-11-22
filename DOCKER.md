@@ -6,10 +6,17 @@ This document explains how to run Agent-Assess using Docker.
 
 ### Using the make.sh Script (Recommended)
 
+**Local Development (Easiest):**
 ```bash
 # Make the script executable (first time only)
 chmod +x make.sh
 
+# Run everything (checks deps, installs, starts dev server)
+./make.sh
+```
+
+**Docker Deployment:**
+```bash
 # Build and start with Docker
 ./make.sh docker-build
 ./make.sh docker-up

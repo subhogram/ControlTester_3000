@@ -31,6 +31,9 @@ Agent-Assess Build Script
 
 Usage: ./make.sh [command]
 
+Default (no command):
+  ./make.sh                 Run complete setup (check deps, install if needed, start dev server)
+
 Commands:
   install           Install dependencies
   dev               Start development server
@@ -52,6 +55,7 @@ Utility Commands:
   help              Show this help message
 
 Examples:
+  ./make.sh                 # Do everything (check, install, dev)
   ./make.sh install         # Install all dependencies
   ./make.sh dev             # Start development server
   ./make.sh docker-up       # Start with Docker Compose
@@ -178,8 +182,37 @@ docker_shell() {
     docker-compose exec web_ui_agent sh
 }
 
+# Run everything (default when no command specified)
+run_all() {
+    print_info "Running complete setup..."
+    echo ""
+    
+    # Check dependencies
+    check_dependencies
+    echo ""
+    
+    # Install if needed
+    if [ ! -d "node_modules" ]; then
+        print_info "node_modules not found, installing dependencies..."
+        install
+        echo ""
+    else
+        print_info "Dependencies already installed ✓"
+        echo ""
+    fi
+    
+    # Start development server
+    print_info "Starting development server..."
+    print_info "Press Ctrl+C to stop"
+    echo ""
+    dev
+}
+
 # Main script logic
-case "${1:-help}" in
+case "${1:-}" in
+    "")
+        run_all
+        ;;
     install)
         install
         ;;

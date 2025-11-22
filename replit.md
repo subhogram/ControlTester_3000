@@ -255,7 +255,10 @@ The application includes Docker support for easy deployment:
 
 **Quick Start:**
 ```bash
-# Using make.sh script (recommended)
+# Local development (simplest)
+./make.sh            # Does everything automatically
+
+# Or Docker deployment
 ./make.sh docker-build
 ./make.sh docker-up
 
@@ -282,7 +285,10 @@ See `DOCKER.md` for complete Docker documentation.
 ### Local Development
 
 ```bash
-# Using make.sh
+# Using make.sh (simplest - does everything)
+./make.sh            # Checks deps, installs if needed, starts dev server
+
+# Or step by step
 ./make.sh install    # Install dependencies
 ./make.sh dev        # Start development server
 
