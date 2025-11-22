@@ -240,6 +240,50 @@ Key dependencies:
 - `express` - Backend server
 - `drizzle-orm` - Database ORM (schema defined, using in-memory storage)
 
+## Deployment
+
+### Docker Deployment
+
+The application includes Docker support for easy deployment:
+
+**Quick Start:**
+```bash
+# Using make.sh script (recommended)
+./make.sh docker-build
+./make.sh docker-up
+
+# Or using Docker Compose directly
+docker-compose build
+docker-compose up -d
+```
+
+**Configuration:**
+- Port: 5000 (configurable in docker-compose.yml)
+- Environment: Production by default
+- External API URL: Set via `VITE_API_URL` environment variable
+- Volume mounts: Enabled for development hot-reload
+
+**Files:**
+- `Dockerfile` - Multi-stage build optimized for production
+- `docker-compose.yml` - Container orchestration
+- `.dockerignore` - Build context optimization
+- `make.sh` - Build and deployment automation script
+- `DOCKER.md` - Detailed Docker setup guide
+
+See `DOCKER.md` for complete Docker documentation.
+
+### Local Development
+
+```bash
+# Using make.sh
+./make.sh install    # Install dependencies
+./make.sh dev        # Start development server
+
+# Or using npm directly
+npm install
+npm run dev
+```
+
 ## User Workflow
 
 1. **Setup**
@@ -264,3 +308,5 @@ Key dependencies:
 - Vectorstores persist to disk and auto-load on page refresh
 - Model selection required before chat/vectorstore operations
 - Toast notifications provide user feedback for all operations
+- Multi-stage Docker build for optimized production images
+- Build automation via make.sh script

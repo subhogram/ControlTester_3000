@@ -22,6 +22,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Build the application
+# This creates:
+# - dist/public/ (Vite client build)
+# - dist/index.js (esbuild server bundle)
 RUN npm run build
 
 # Production stage
@@ -34,12 +37,21 @@ ENV NODE_ENV=production
 # Install curl for healthcheck
 RUN apk add --no-cache curl
 
-# Copy built application
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/server ./server
-COPY --from=builder /app/shared ./shared
+# Copy package.json for npm start command
 COPY --from=builder /app/package.json ./
-COPY --from=builder /app/node_modules ./node_modules
+
+# Copy built application
+# Server bundle
+COPY --from=builder /app/dist ./dist
+
+# Server source files (may be needed for non-bundled imports)
+COPY --from=builder /app/server ./server
+
+# Shared types/schemas
+COPY --from=builder /app/shared ./shared
+
+# Copy production dependencies only
+COPY --from=deps /app/node_modules ./node_modules
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \
