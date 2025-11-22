@@ -1,22 +1,43 @@
 import { useState, useRef, KeyboardEvent, useEffect } from "react";
-import { Paperclip, ArrowUp, Plus, Mic } from "lucide-react";
+import { Paperclip, ArrowUp, Plus, Mic, ChevronLeft, ChevronRight, X, FileText, CheckCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
   onFileSelect: (files: File[]) => void;
   disabled?: boolean;
+  files?: File[];
+  onRemoveFile?: (index: number) => void;
+  onClearAllFiles?: () => void;
+  isProcessing?: boolean;
+  hasVectorstore?: boolean;
 }
 
 export default function ChatInput({
   onSendMessage,
   onFileSelect,
   disabled = false,
+  files = [],
+  onRemoveFile,
+  onClearAllFiles,
+  isProcessing = false,
+  hasVectorstore = false,
 }: ChatInputProps) {
   const [message, setMessage] = useState("");
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Reset file index when files change
+  useEffect(() => {
+    if (files.length === 0) {
+      setCurrentFileIndex(0);
+    } else if (currentFileIndex >= files.length) {
+      setCurrentFileIndex(files.length - 1);
+    }
+  }, [files.length, currentFileIndex]);
 
   // Auto-resize textarea based on content (lovable.dev behavior)
   useEffect(() => {
@@ -52,6 +73,20 @@ export default function ChatInput({
     }
   };
 
+  const handlePrevFile = () => {
+    setCurrentFileIndex((prev) => (prev > 0 ? prev - 1 : files.length - 1));
+  };
+
+  const handleNextFile = () => {
+    setCurrentFileIndex((prev) => (prev < files.length - 1 ? prev + 1 : 0));
+  };
+
+  const handleRemoveCurrentFile = () => {
+    if (onRemoveFile && files.length > 0) {
+      onRemoveFile(currentFileIndex);
+    }
+  };
+
   return (
     <div className="p-4">
       <div className="bg-card/80 backdrop-blur-sm rounded-3xl p-4 border border-border/50 shadow-lg max-w-3xl mx-auto">
@@ -63,6 +98,86 @@ export default function ChatInput({
           onChange={handleFileChange}
           data-testid="input-file"
         />
+
+        {/* File Slider */}
+        {files.length > 0 && (
+          <div className="mb-3 flex items-center gap-2" data-testid="container-file-slider">
+            {/* Status Badge */}
+            <div className="flex-shrink-0">
+              {isProcessing && (
+                <Badge variant="secondary" className="gap-1.5" data-testid="badge-processing">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Processing...
+                </Badge>
+              )}
+              {!isProcessing && hasVectorstore && (
+                <Badge variant="default" className="gap-1.5 bg-green-600 hover:bg-green-700" data-testid="badge-vectorstore-ready">
+                  <CheckCircle className="h-3 w-3" />
+                  Ready
+                </Badge>
+              )}
+            </div>
+
+            {/* Previous Button */}
+            {files.length > 1 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 flex-shrink-0 hover-elevate"
+                onClick={handlePrevFile}
+                data-testid="button-prev-file"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+            )}
+
+            {/* Current File Display */}
+            <div className="flex-1 flex items-center gap-2 px-3 py-2 bg-muted rounded-lg min-w-0" data-testid={`file-chip-${currentFileIndex}`}>
+              <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+              <span className="text-sm truncate flex-1" data-testid={`text-filename-${currentFileIndex}`}>
+                {files[currentFileIndex]?.name}
+              </span>
+              {files.length > 1 && (
+                <span className="text-xs text-muted-foreground flex-shrink-0">
+                  {currentFileIndex + 1}/{files.length}
+                </span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-6 w-6 flex-shrink-0"
+                onClick={handleRemoveCurrentFile}
+                data-testid={`button-remove-file-${currentFileIndex}`}
+              >
+                <X className="h-3 w-3" />
+              </Button>
+            </div>
+
+            {/* Next Button */}
+            {files.length > 1 && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 flex-shrink-0 hover-elevate"
+                onClick={handleNextFile}
+                data-testid="button-next-file"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            )}
+
+            {/* Clear All Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onClearAllFiles}
+              className="flex-shrink-0 h-8"
+              data-testid="button-clear-all"
+            >
+              Clear All
+            </Button>
+          </div>
+        )}
         
         <Textarea
           ref={textareaRef}

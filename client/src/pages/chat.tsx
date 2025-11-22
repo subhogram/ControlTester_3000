@@ -6,7 +6,6 @@ import { useChatContext } from "@/contexts/ChatContext";
 import ChatHeader from "@/components/ChatHeader";
 import ChatMessages from "@/components/ChatMessages";
 import ChatInput from "@/components/ChatInput";
-import FileUploadBar from "@/components/FileUploadBar";
 
 interface Message {
   id: string;
@@ -347,24 +346,6 @@ export default function ChatPage() {
                 Ask me anything, upload documents, or explore the power of AI-driven conversations
               </p>
             </div>
-            
-            {uploadedFiles.length > 0 && (
-              <FileUploadBar
-                files={uploadedFiles}
-                onRemoveFile={(index) => {
-                  setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
-                  if (uploadedFiles.length === 1) {
-                    setHasAttachments(false);
-                  }
-                }}
-                onClearAll={() => {
-                  setUploadedFiles([]);
-                  setHasAttachments(false);
-                }}
-                isProcessing={isProcessingFiles}
-                hasVectorstore={hasAttachments}
-              />
-            )}
 
             <ChatInput
               onSendMessage={handleSendMessage}
@@ -372,6 +353,19 @@ export default function ChatPage() {
                 setUploadedFiles((prev) => [...prev, ...files])
               }
               disabled={chatMutation.isPending || isProcessingFiles}
+              files={uploadedFiles}
+              onRemoveFile={(index) => {
+                setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+                if (uploadedFiles.length === 1) {
+                  setHasAttachments(false);
+                }
+              }}
+              onClearAllFiles={() => {
+                setUploadedFiles([]);
+                setHasAttachments(false);
+              }}
+              isProcessing={isProcessingFiles}
+              hasVectorstore={hasAttachments}
             />
           </div>
         </div>
@@ -380,7 +374,12 @@ export default function ChatPage() {
         <>
           <ChatMessages messages={messages} />
 
-          <FileUploadBar
+          <ChatInput
+            onSendMessage={handleSendMessage}
+            onFileSelect={(files) =>
+              setUploadedFiles((prev) => [...prev, ...files])
+            }
+            disabled={chatMutation.isPending || isProcessingFiles}
             files={uploadedFiles}
             onRemoveFile={(index) => {
               setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
@@ -388,20 +387,12 @@ export default function ChatPage() {
                 setHasAttachments(false);
               }
             }}
-            onClearAll={() => {
+            onClearAllFiles={() => {
               setUploadedFiles([]);
               setHasAttachments(false);
             }}
             isProcessing={isProcessingFiles}
             hasVectorstore={hasAttachments}
-          />
-
-          <ChatInput
-            onSendMessage={handleSendMessage}
-            onFileSelect={(files) =>
-              setUploadedFiles((prev) => [...prev, ...files])
-            }
-            disabled={chatMutation.isPending || isProcessingFiles}
           />
         </>
       )}
