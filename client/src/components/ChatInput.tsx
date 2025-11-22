@@ -3,7 +3,6 @@ import { Paperclip, ArrowUp, Plus, Mic, X, FileText, CheckCircle, Loader2 } from
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface ChatInputProps {
   onSendMessage: (message: string) => void;
@@ -96,8 +95,8 @@ export default function ChatInput({
             </div>
 
             {/* Scrollable Files */}
-            <ScrollArea className="flex-1">
-              <div className="flex gap-2 pb-2">
+            <div className="flex-1 overflow-x-auto">
+              <div className="flex gap-2 pb-1">
                 {files.map((file, index) => (
                   <div
                     key={`${file.name}-${index}`}
@@ -120,7 +119,7 @@ export default function ChatInput({
                   </div>
                 ))}
               </div>
-            </ScrollArea>
+            </div>
 
             {/* Clear All Button */}
             <Button
