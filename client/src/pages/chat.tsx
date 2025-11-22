@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
@@ -6,13 +6,9 @@ import { useChatContext } from "@/contexts/ChatContext";
 import ChatHeader from "@/components/ChatHeader";
 import ChatMessages from "@/components/ChatMessages";
 import ChatInput from "@/components/ChatInput";
-
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp?: string;
-}
+import type { Message } from "@/types";
+import { buildKnowledgeBase, saveVectorstore, sendChatMessage, loadAllVectorstores } from "@/lib/chatHelpers";
+import { VECTORSTORE_PATHS, KB_TYPES } from "@/lib/constants";
 
 export default function ChatPage() {
   const [, setLocation] = useLocation();
@@ -30,71 +26,15 @@ export default function ChatPage() {
 
   const uploadFilesMutation = useMutation({
     mutationFn: async ({ files, selected_model }: { files: File[]; selected_model: string }) => {
-      // Step 1: Build knowledge base (same as Settings page)
-      const formData = new FormData();
-      formData.append("selected_model", selected_model);
-      formData.append("batch_size", "15");
-      formData.append("delay_between_batches", "0.2");
-      formData.append("max_retries", "3");
-      formData.append("kb_type", "chat");
-
-      files.forEach((file) => {
-        formData.append("files", file);
-      });
-
-      const response = await fetch("http://localhost:8000/build-knowledge-base", {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || "Failed to build knowledge base");
-      }
-
-      const result = await response.json();
+      const result = await buildKnowledgeBase(files, selected_model, KB_TYPES.CHAT);
       
-      // Step 2: Save vectorstore to disk (chat_attachment_vectorstore folder)
       try {
-        const saveFormData = new URLSearchParams();
-        saveFormData.append("kb_type", "chat");
-        saveFormData.append("dir_path", "chat_attachment_vectorstore");
-
-        const saveResponse = await fetch("http://localhost:8000/save-vectorstore", {
-          method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          body: saveFormData.toString(),
-        });
-        
-        if (!saveResponse.ok) {
-          console.warn("Failed to save chat vectorstore to disk");
-        }
+        await saveVectorstore(KB_TYPES.CHAT, VECTORSTORE_PATHS.CHAT);
       } catch (saveError) {
         console.warn("Error saving chat vectorstore:", saveError);
       }
       
       return result;
-    },
-  });
-
-  const loadVectorstoreMutation = useMutation({
-    mutationFn: async ({ dir_path, kb_type, model_name }: { dir_path: string; kb_type: string; model_name: string }) => {
-      const formData = new URLSearchParams();
-      formData.append("dir_path", dir_path);
-      formData.append("kb_type", kb_type);
-      formData.append("model_name", model_name);
-
-      const response = await fetch("http://localhost:8000/load-vectorstore", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: formData.toString(),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Failed to load ${kb_type} vectorstore`);
-      }
-
-      return await response.json();
     },
   });
 
@@ -110,34 +50,7 @@ export default function ChatPage() {
       has_attachments: boolean;
       chat_history: Array<{role: string; content: string}>;
     }) => {
-      // Call external API directly, exactly like file upload
-      const payload: any = {
-        selected_model,
-        user_input,
-        chat_history,  // Include full conversation history
-        global_kb_path: "global_kb_vectorstore",
-        company_kb_path: "company_kb_vectorstore",
-      };
-      
-      // If there are chat attachments, include the path
-      if (has_attachments) {
-        payload.chat_kb_path = "chat_attachment_vectorstore";
-      }
-
-      const response = await fetch("http://localhost:8000/chat", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Failed to get chat response");
-      }
-
-      return await response.json();
+      return await sendChatMessage(user_input, selected_model, has_attachments, chat_history);
     },
     onError: (error: Error) => {
       toast({
@@ -222,32 +135,8 @@ export default function ChatPage() {
     }
 
     // Load all vectorstores into memory before chat
-    const vectorstoresToLoad = [
-      loadVectorstoreMutation.mutateAsync({
-        dir_path: "global_kb_vectorstore",
-        kb_type: "global",
-        model_name: selectedModel,
-      }),
-      loadVectorstoreMutation.mutateAsync({
-        dir_path: "company_kb_vectorstore",
-        kb_type: "company",
-        model_name: selectedModel,
-      }),
-    ];
-    
-    // If we have chat attachments, also load the chat vectorstore
-    if (currentHasAttachments) {
-      vectorstoresToLoad.push(
-        loadVectorstoreMutation.mutateAsync({
-          dir_path: "chat_attachment_vectorstore",
-          kb_type: "chat",
-          model_name: selectedModel,
-        })
-      );
-    }
-
     try {
-      await Promise.allSettled(vectorstoresToLoad);
+      await loadAllVectorstores(selectedModel, currentHasAttachments);
     } catch (error) {
       // Silently continue - vectorstores may not exist, which is OK
       console.log("Vectorstore loading info:", error);
@@ -312,18 +201,54 @@ export default function ChatPage() {
     }
   };
 
-  const handleClearChat = () => {
+  const handleClearChat = useCallback(() => {
     clearChat();
     toast({
       title: "✓ Chat Cleared",
       description: "All messages and files have been cleared",
       className: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
     });
-  };
+  }, [clearChat, toast]);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     console.log("Logout clicked");
-  };
+  }, []);
+
+  const handleFileSelect = useCallback((files: File[]) => {
+    setUploadedFiles((prev) => [...prev, ...files]);
+  }, [setUploadedFiles]);
+
+  const handleRemoveFile = useCallback((index: number) => {
+    setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+    if (uploadedFiles.length === 1) {
+      setHasAttachments(false);
+    }
+  }, [setUploadedFiles, uploadedFiles.length, setHasAttachments]);
+
+  const handleClearAllFiles = useCallback(() => {
+    setUploadedFiles([]);
+    setHasAttachments(false);
+  }, [setUploadedFiles, setHasAttachments]);
+
+  const chatInputProps = useMemo(() => ({
+    onSendMessage: handleSendMessage,
+    onFileSelect: handleFileSelect,
+    disabled: chatMutation.isPending || isProcessingFiles,
+    files: uploadedFiles,
+    onRemoveFile: handleRemoveFile,
+    onClearAllFiles: handleClearAllFiles,
+    isProcessing: isProcessingFiles,
+    hasVectorstore: hasAttachments,
+  }), [
+    handleSendMessage,
+    handleFileSelect,
+    chatMutation.isPending,
+    isProcessingFiles,
+    uploadedFiles,
+    handleRemoveFile,
+    handleClearAllFiles,
+    hasAttachments,
+  ]);
 
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-[#654ea3]/20 via-[#8b6dbb]/10 to-[#eaafc8]/20">
@@ -347,26 +272,7 @@ export default function ChatPage() {
               </p>
             </div>
 
-            <ChatInput
-              onSendMessage={handleSendMessage}
-              onFileSelect={(files) =>
-                setUploadedFiles((prev) => [...prev, ...files])
-              }
-              disabled={chatMutation.isPending || isProcessingFiles}
-              files={uploadedFiles}
-              onRemoveFile={(index) => {
-                setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
-                if (uploadedFiles.length === 1) {
-                  setHasAttachments(false);
-                }
-              }}
-              onClearAllFiles={() => {
-                setUploadedFiles([]);
-                setHasAttachments(false);
-              }}
-              isProcessing={isProcessingFiles}
-              hasVectorstore={hasAttachments}
-            />
+            <ChatInput {...chatInputProps} />
           </div>
         </div>
       ) : (
@@ -374,26 +280,7 @@ export default function ChatPage() {
         <>
           <ChatMessages messages={messages} />
 
-          <ChatInput
-            onSendMessage={handleSendMessage}
-            onFileSelect={(files) =>
-              setUploadedFiles((prev) => [...prev, ...files])
-            }
-            disabled={chatMutation.isPending || isProcessingFiles}
-            files={uploadedFiles}
-            onRemoveFile={(index) => {
-              setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
-              if (uploadedFiles.length === 1) {
-                setHasAttachments(false);
-              }
-            }}
-            onClearAllFiles={() => {
-              setUploadedFiles([]);
-              setHasAttachments(false);
-            }}
-            isProcessing={isProcessingFiles}
-            hasVectorstore={hasAttachments}
-          />
+          <ChatInput {...chatInputProps} />
         </>
       )}
     </div>
