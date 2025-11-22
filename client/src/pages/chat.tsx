@@ -7,7 +7,6 @@ import ChatHeader from "@/components/ChatHeader";
 import ChatMessages from "@/components/ChatMessages";
 import ChatInput from "@/components/ChatInput";
 import FileUploadBar from "@/components/FileUploadBar";
-import FileActionsPanel from "@/components/FileActionsPanel";
 
 interface Message {
   id: string;
@@ -327,14 +326,6 @@ export default function ChatPage() {
     console.log("Logout clicked");
   };
 
-  const handleTodAction = () => {
-    console.log("TOD action on files:", uploadedFiles.map((f) => f.name));
-  };
-
-  const handleToeAction = () => {
-    console.log("TOE action on files:", uploadedFiles.map((f) => f.name));
-  };
-
   return (
     <div className="h-screen flex flex-col bg-gradient-to-br from-[#654ea3]/20 via-[#8b6dbb]/10 to-[#eaafc8]/20">
       <ChatHeader
@@ -414,12 +405,6 @@ export default function ChatPage() {
           />
         </>
       )}
-
-      <FileActionsPanel
-        fileCount={uploadedFiles.length}
-        onTodAction={handleTodAction}
-        onToeAction={handleToeAction}
-      />
     </div>
   );
 }
