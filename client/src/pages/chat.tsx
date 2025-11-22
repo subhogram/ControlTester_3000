@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { useChatContext } from "@/contexts/ChatContext";
+import { useChatContext } from "@/hooks/useChatContext";
 import ChatHeader from "@/components/ChatHeader";
 import ChatMessages from "@/components/ChatMessages";
 import ChatInput from "@/components/ChatInput";

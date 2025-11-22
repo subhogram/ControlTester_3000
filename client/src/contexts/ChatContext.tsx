@@ -1,7 +1,7 @@
-import { createContext, useContext, useState, ReactNode } from "react";
+import { createContext, useState, ReactNode } from "react";
 import type { Message } from "@/types";
 
-interface ChatContextType {
+export interface ChatContextType {
   messages: Message[];
   setMessages: (messages: Message[] | ((prev: Message[]) => Message[])) => void;
   uploadedFiles: File[];
@@ -11,7 +11,7 @@ interface ChatContextType {
   clearChat: () => void;
 }
 
-const ChatContext = createContext<ChatContextType | undefined>(undefined);
+export const ChatContext = createContext<ChatContextType | undefined>(undefined);
 
 export function ChatProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -41,10 +41,3 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useChatContext() {
-  const context = useContext(ChatContext);
-  if (!context) {
-    throw new Error("useChatContext must be used within ChatProvider");
-  }
-  return context;
-}

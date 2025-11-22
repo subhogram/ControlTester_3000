@@ -70,11 +70,13 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 ├── client/src/
 │   ├── types/
 │   │   └── index.ts           # Shared TypeScript types (Message interface)
+│   ├── hooks/
+│   │   └── useChatContext.ts  # Custom hook for chat context
 │   ├── pages/
 │   │   ├── chat.tsx           # Chat page with file upload
 │   │   └── settings.tsx       # Model & vectorstore settings
 │   ├── contexts/
-│   │   └── ChatContext.tsx    # Chat state persistence context
+│   │   └── ChatContext.tsx    # Chat state persistence provider
 │   └── components/
 │       ├── ChatInput.tsx      # Chat input with file selector
 │       ├── FileUploadBar.tsx  # File upload status bar
@@ -189,6 +191,7 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 - ✅ **Improved Error Handling**: Added response.ok checks in vectorstore loading with detailed logging
 - ✅ **Code Consolidation**: Simplified chatInputProps object to reduce duplication without ineffective memoization
 - ✅ **Maintained React Query Benefits**: Kept fetch logic inside mutations for proper caching/retry semantics
+- ✅ **Fixed Fast Refresh Warning**: Split `useChatContext` hook into separate file (`client/src/hooks/useChatContext.ts`) to enable Vite Fast Refresh for ChatContext.tsx
 
 ### Chat State Persistence
 - ✅ **React Context Implementation**: Created ChatProvider to maintain state across navigation
