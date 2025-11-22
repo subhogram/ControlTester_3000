@@ -46,7 +46,7 @@ export default function ChatInput({
   return (
     <div className="border-t bg-background p-4">
       <div className="max-w-3xl mx-auto">
-        <div className="flex items-end gap-2 border rounded-2xl bg-card p-3 hover-highlight">
+        <div className="flex items-center gap-2 border rounded-2xl bg-card p-2 hover-highlight">
           <input
             ref={fileInputRef}
             type="file"
@@ -60,7 +60,7 @@ export default function ChatInput({
             variant="ghost"
             size="icon"
             onClick={handleFileClick}
-            className="flex-shrink-0"
+            className="flex-shrink-0 self-start"
             data-testid="button-attach"
           >
             <Paperclip className="h-5 w-5" />
@@ -71,7 +71,7 @@ export default function ChatInput({
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
-            className="resize-none border-0 bg-transparent focus-visible:ring-0 shadow-none min-h-[52px] max-h-[200px]"
+            className="resize-none border-0 bg-transparent focus-visible:ring-0 shadow-none min-h-[40px] max-h-[200px] py-2"
             disabled={disabled}
             data-testid="input-message"
           />
@@ -80,7 +80,7 @@ export default function ChatInput({
             onClick={handleSend}
             disabled={!message.trim() || disabled}
             size="icon"
-            className="flex-shrink-0"
+            className="flex-shrink-0 self-start"
             data-testid="button-send"
           >
             <Send className="h-5 w-5" />
