@@ -65,7 +65,10 @@ export default function ChatInput({
 
   return (
     <div className="p-4">
-      <div className="bg-card/80 backdrop-blur-sm rounded-3xl p-4 border border-border/50 shadow-lg max-w-3xl mx-auto">
+      <div 
+        className="bg-card/80 backdrop-blur-sm rounded-3xl p-4 border border-border/50 max-w-3xl mx-auto"
+        style={{ boxShadow: 'var(--shadow-glass)' }}
+      >
         <input
           ref={fileInputRef}
           type="file"
