@@ -101,7 +101,39 @@ For production deployment:
 | `./make.sh check` | Check installed dependencies |
 | `./make.sh clean` | Clean build artifacts |
 
+## Build Structure
+
+The application uses a two-step build process:
+
+1. **Client Build** (Vite):
+   - Output: `dist/public/` directory
+   - Contains: `index.html` and `assets/` folder
+
+2. **Server Build** (esbuild):
+   - Output: `dist/index.js` (bundled server)
+   - Serves static files from `dist/public/`
+
+The Dockerfile copies the entire `dist/` directory, which contains both the server bundle and client assets.
+
 ## Troubleshooting
+
+### Verify build structure locally
+
+Before building with Docker, verify the build works locally:
+
+```bash
+# Clean and rebuild
+npm run build
+
+# Check the output
+ls -la dist/
+ls -la dist/public/
+
+# Should see:
+# dist/index.js (server bundle)
+# dist/public/index.html (client entry)
+# dist/public/assets/ (client assets)
+```
 
 ### Container won't start
 
@@ -109,6 +141,11 @@ Check logs:
 ```bash
 ./make.sh docker-logs
 ```
+
+If you see "Cannot find module" errors, the build structure may be incorrect. Verify that:
+- `dist/index.js` exists
+- `dist/public/index.html` exists
+- `npm run build` completes without errors
 
 ### Port already in use
 

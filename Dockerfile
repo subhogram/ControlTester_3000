@@ -23,7 +23,7 @@ COPY . .
 
 # Build the application
 # This creates:
-# - dist/public/ (Vite client build)
+# - dist/public/ (Vite client build with index.html and assets)
 # - dist/index.js (esbuild server bundle)
 RUN npm run build
 
@@ -40,18 +40,17 @@ RUN apk add --no-cache curl
 # Copy package.json for npm start command
 COPY --from=builder /app/package.json ./
 
-# Copy built application
-# Server bundle
+# Copy built application (includes both server bundle and client static files)
 COPY --from=builder /app/dist ./dist
 
-# Server source files (may be needed for non-bundled imports)
-COPY --from=builder /app/server ./server
-
-# Shared types/schemas
+# Copy shared types/schemas (may be referenced by server bundle)
 COPY --from=builder /app/shared ./shared
 
 # Copy production dependencies only
 COPY --from=deps /app/node_modules ./node_modules
+
+# Create directories for vectorstore data
+RUN mkdir -p /app/global_kb_vectorstore /app/company_kb_vectorstore /app/chat_attachment_vectorstore /app/chat_attachments
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \

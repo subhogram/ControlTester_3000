@@ -184,6 +184,13 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 
 ## Recent Changes (November 22, 2025)
 
+### Docker & Build Automation
+- ✅ **Docker Support**: Added complete Docker setup with multi-stage Dockerfile optimized for production
+- ✅ **Docker Compose**: Created docker-compose.yml with health checks, resource limits, and proper networking
+- ✅ **Build Automation**: Created `make.sh` script with commands for development, Docker, and deployment
+- ✅ **Build Optimization**: Added `.dockerignore` to exclude unnecessary files from Docker context
+- ✅ **Documentation**: Created `DOCKER.md` with complete setup guide and troubleshooting
+
 ### Code Optimization & Bug Fixes
 - ✅ **Shared Types**: Created `client/src/types/index.ts` to centralize Message interface (eliminates duplication)
 - ✅ **API Configuration**: Made external API URL configurable via `VITE_API_URL` environment variable
