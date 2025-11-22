@@ -336,7 +336,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-[#654ea3]/20 via-[#8b6dbb]/10 to-[#eaafc8]/20">
+    <div className="h-screen flex flex-col bg-gradient-to-br from-[#0f172a] via-[#1e3a8a] to-[#3730a3]">
       <ChatHeader
         onSettingsClick={() => setLocation("/settings")}
         onLogout={handleLogout}
