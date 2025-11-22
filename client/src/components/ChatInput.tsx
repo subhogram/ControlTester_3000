@@ -71,7 +71,7 @@ export default function ChatInput({
           onKeyDown={handleKeyDown}
           placeholder="Ask Agent-Assess to help with your cybersecurity assessment..."
           rows={1}
-          className="resize-none border-0 bg-transparent focus-visible:ring-0 shadow-none min-h-[24px] max-h-[200px] text-base placeholder:text-muted-foreground/60 mb-3 overflow-hidden"
+          className="resize-none border-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 shadow-none min-h-[24px] max-h-[200px] text-base placeholder:text-muted-foreground/60 mb-3 overflow-hidden outline-none"
           disabled={disabled}
           data-testid="input-message"
         />
