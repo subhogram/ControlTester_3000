@@ -36,16 +36,16 @@ export default function ChatHeader({
       </div>
 
       <div className="flex items-center gap-2">
-        {hasMessages && (
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={onClearChat}
-            data-testid="button-clear-chat"
-          >
-            <Trash2 className="h-5 w-5" />
-          </Button>
-        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onClearChat}
+          disabled={!hasMessages}
+          data-testid="button-clear-chat"
+          className="hover-elevate"
+        >
+          <Trash2 className="h-5 w-5" />
+        </Button>
 
         <Button
           variant="ghost"
