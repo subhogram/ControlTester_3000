@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  web_ui_agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agent_assess_web
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - NODE_ENV=production
+      - VITE_API_URL=${VITE_API_URL:-http://localhost:8000}
+    networks:
+      - appnet
+    volumes:
+      # Development mode: mount source code for hot reload
+      # Comment out for production builds
+      - .:/app:delegated
+      - /app/node_modules
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256m
+          cpus: '0.5'
+
+networks:
+  appnet:
+    driver: bridge
