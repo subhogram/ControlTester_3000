@@ -53,72 +53,70 @@ export default function ChatInput({
   };
 
   return (
-    <div className="bg-background p-4">
-      <div className="max-w-3xl mx-auto">
-        <div className="bg-card/80 backdrop-blur-sm rounded-3xl p-4 border border-border/50 shadow-lg">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            onChange={handleFileChange}
-            data-testid="input-file"
-          />
-          
-          <Textarea
-            ref={textareaRef}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Ask Agent-Assess to help with your cybersecurity assessment..."
-            rows={1}
-            className="resize-none border-0 bg-transparent focus-visible:ring-0 shadow-none min-h-[24px] max-h-[200px] text-base placeholder:text-muted-foreground/60 mb-3 overflow-hidden"
-            disabled={disabled}
-            data-testid="input-message"
-          />
+    <div className="p-4">
+      <div className="bg-card/80 backdrop-blur-sm rounded-3xl p-4 border border-border/50 shadow-lg max-w-3xl mx-auto">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={handleFileChange}
+          data-testid="input-file"
+        />
+        
+        <Textarea
+          ref={textareaRef}
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask Agent-Assess to help with your cybersecurity assessment..."
+          rows={1}
+          className="resize-none border-0 bg-transparent focus-visible:ring-0 shadow-none min-h-[24px] max-h-[200px] text-base placeholder:text-muted-foreground/60 mb-3 overflow-hidden"
+          disabled={disabled}
+          data-testid="input-message"
+        />
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 rounded-full hover-elevate"
-              data-testid="button-plus"
-            >
-              <Plus className="h-5 w-5" />
-            </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 rounded-full hover-elevate"
+            data-testid="button-plus"
+          >
+            <Plus className="h-5 w-5" />
+          </Button>
 
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleFileClick}
-              className="gap-2 h-9 rounded-full hover-elevate"
-              data-testid="button-attach"
-            >
-              <Paperclip className="h-4 w-4" />
-              <span className="text-sm">Attach</span>
-            </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleFileClick}
+            className="gap-2 h-9 rounded-full hover-elevate"
+            data-testid="button-attach"
+          >
+            <Paperclip className="h-4 w-4" />
+            <span className="text-sm">Attach</span>
+          </Button>
 
-            <div className="flex-1" />
+          <div className="flex-1" />
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 rounded-full hover-elevate"
-              data-testid="button-mic"
-            >
-              <Mic className="h-5 w-5" />
-            </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-9 w-9 rounded-full hover-elevate"
+            data-testid="button-mic"
+          >
+            <Mic className="h-5 w-5" />
+          </Button>
 
-            <Button
-              onClick={handleSend}
-              disabled={!message.trim() || disabled}
-              size="icon"
-              className="h-9 w-9 rounded-full"
-              data-testid="button-send"
-            >
-              <ArrowUp className="h-5 w-5" />
-            </Button>
-          </div>
+          <Button
+            onClick={handleSend}
+            disabled={!message.trim() || disabled}
+            size="icon"
+            className="h-9 w-9 rounded-full"
+            data-testid="button-send"
+          >
+            <ArrowUp className="h-5 w-5" />
+          </Button>
         </div>
       </div>
     </div>

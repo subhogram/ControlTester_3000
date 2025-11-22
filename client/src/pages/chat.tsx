@@ -350,21 +350,23 @@ export default function ChatPage() {
               </p>
             </div>
             
-            <FileUploadBar
-              files={uploadedFiles}
-              onRemoveFile={(index) => {
-                setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
-                if (uploadedFiles.length === 1) {
+            {uploadedFiles.length > 0 && (
+              <FileUploadBar
+                files={uploadedFiles}
+                onRemoveFile={(index) => {
+                  setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+                  if (uploadedFiles.length === 1) {
+                    setHasAttachments(false);
+                  }
+                }}
+                onClearAll={() => {
+                  setUploadedFiles([]);
                   setHasAttachments(false);
-                }
-              }}
-              onClearAll={() => {
-                setUploadedFiles([]);
-                setHasAttachments(false);
-              }}
-              isProcessing={isProcessingFiles}
-              hasVectorstore={hasAttachments}
-            />
+                }}
+                isProcessing={isProcessingFiles}
+                hasVectorstore={hasAttachments}
+              />
+            )}
 
             <ChatInput
               onSendMessage={handleSendMessage}
