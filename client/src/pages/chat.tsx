@@ -337,31 +337,74 @@ export default function ChatPage() {
         hasMessages={messages.length > 0}
       />
 
-      <ChatMessages messages={messages} />
+      {messages.length === 0 ? (
+        // Centered layout when no messages
+        <div className="flex-1 flex flex-col items-center justify-center px-6">
+          <div className="w-full max-w-3xl space-y-6">
+            <div className="text-center space-y-3">
+              <h2 className="text-2xl font-semibold text-foreground">
+                What can I help you with?
+              </h2>
+              <p className="text-muted-foreground">
+                Ask me anything, upload documents, or explore the power of AI-driven conversations
+              </p>
+            </div>
+            
+            <FileUploadBar
+              files={uploadedFiles}
+              onRemoveFile={(index) => {
+                setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+                if (uploadedFiles.length === 1) {
+                  setHasAttachments(false);
+                }
+              }}
+              onClearAll={() => {
+                setUploadedFiles([]);
+                setHasAttachments(false);
+              }}
+              isProcessing={isProcessingFiles}
+              hasVectorstore={hasAttachments}
+            />
 
-      <FileUploadBar
-        files={uploadedFiles}
-        onRemoveFile={(index) => {
-          setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
-          if (uploadedFiles.length === 1) {
-            setHasAttachments(false);
-          }
-        }}
-        onClearAll={() => {
-          setUploadedFiles([]);
-          setHasAttachments(false);
-        }}
-        isProcessing={isProcessingFiles}
-        hasVectorstore={hasAttachments}
-      />
+            <ChatInput
+              onSendMessage={handleSendMessage}
+              onFileSelect={(files) =>
+                setUploadedFiles((prev) => [...prev, ...files])
+              }
+              disabled={chatMutation.isPending || isProcessingFiles}
+            />
+          </div>
+        </div>
+      ) : (
+        // Bottom layout when messages exist
+        <>
+          <ChatMessages messages={messages} />
 
-      <ChatInput
-        onSendMessage={handleSendMessage}
-        onFileSelect={(files) =>
-          setUploadedFiles((prev) => [...prev, ...files])
-        }
-        disabled={chatMutation.isPending || isProcessingFiles}
-      />
+          <FileUploadBar
+            files={uploadedFiles}
+            onRemoveFile={(index) => {
+              setUploadedFiles((prev) => prev.filter((_, i) => i !== index));
+              if (uploadedFiles.length === 1) {
+                setHasAttachments(false);
+              }
+            }}
+            onClearAll={() => {
+              setUploadedFiles([]);
+              setHasAttachments(false);
+            }}
+            isProcessing={isProcessingFiles}
+            hasVectorstore={hasAttachments}
+          />
+
+          <ChatInput
+            onSendMessage={handleSendMessage}
+            onFileSelect={(files) =>
+              setUploadedFiles((prev) => [...prev, ...files])
+            }
+            disabled={chatMutation.isPending || isProcessingFiles}
+          />
+        </>
+      )}
 
       <FileActionsPanel
         fileCount={uploadedFiles.length}
