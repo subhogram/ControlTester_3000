@@ -8,7 +8,9 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 ### Frontend
 - **Framework**: React with TypeScript
 - **Routing**: Wouter
-- **State Management**: TanStack Query (React Query v5)
+- **State Management**: 
+  - TanStack Query (React Query v5) for API data fetching
+  - React Context for chat state persistence
 - **UI Components**: Shadcn UI + Radix UI
 - **Styling**: Tailwind CSS with dark mode support
 
@@ -52,6 +54,11 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 - Context-aware responses using vectorstores
 - Loading states and error handling
 - Toast notifications for user feedback
+- **State Persistence**: Chat messages and uploaded files persist when navigating between pages
+  - Uses React Context (ChatProvider) to maintain state across route changes
+  - Messages remain visible when switching to Settings and back
+  - Uploaded files are retained during navigation
+  - Clear Chat button resets all state (messages + files)
 
 ## File Structure
 
@@ -64,6 +71,8 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 │   ├── pages/
 │   │   ├── chat.tsx           # Chat page with file upload
 │   │   └── settings.tsx       # Model & vectorstore settings
+│   ├── contexts/
+│   │   └── ChatContext.tsx    # Chat state persistence context
 │   └── components/
 │       ├── ChatInput.tsx      # Chat input with file selector
 │       ├── FileUploadBar.tsx  # File upload status bar
@@ -169,7 +178,17 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 - ✅ **Company KB**: Saved to disk, persists across sessions  
 - 🔄 **Chat Attachments**: In-memory only, cleared when external API restarts
 
-## Recent Changes (November 9, 2025)
+## Recent Changes (November 22, 2025)
+
+### Chat State Persistence
+- ✅ **React Context Implementation**: Created ChatProvider to maintain state across navigation
+- ✅ **Message Persistence**: Chat messages persist when switching to Settings and back
+- ✅ **File Persistence**: Uploaded files remain in state during navigation
+- ✅ **Centered UI**: Message box background restricted to component only (not full container)
+- ✅ **Auto-expanding Input**: Textarea grows dynamically with content (lovable.dev style)
+- ✅ **Conditional File Upload Bar**: Only shows when files are present in centered mode
+
+## Previous Changes (November 9, 2025)
 
 ### Complete Direct External API Integration
 - ✅ **File uploads**: Frontend → `POST http://localhost:8000/build-knowledge-base`

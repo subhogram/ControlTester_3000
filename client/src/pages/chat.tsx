@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { useChatContext } from "@/contexts/ChatContext";
 import ChatHeader from "@/components/ChatHeader";
 import ChatMessages from "@/components/ChatMessages";
 import ChatInput from "@/components/ChatInput";
@@ -17,9 +18,15 @@ interface Message {
 
 export default function ChatPage() {
   const [, setLocation] = useLocation();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
-  const [hasAttachments, setHasAttachments] = useState(false);
+  const { 
+    messages, 
+    setMessages, 
+    uploadedFiles, 
+    setUploadedFiles, 
+    hasAttachments, 
+    setHasAttachments,
+    clearChat 
+  } = useChatContext();
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const { toast } = useToast();
 
@@ -308,10 +315,10 @@ export default function ChatPage() {
   };
 
   const handleClearChat = () => {
-    setMessages([]);
+    clearChat();
     toast({
       title: "✓ Chat Cleared",
-      description: "All messages have been cleared",
+      description: "All messages and files have been cleared",
       className: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
     });
   };
