@@ -68,6 +68,8 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 ├── global_kb_vectorstore/     # General context vectorstore
 ├── company_kb_vectorstore/    # Company policy vectorstore
 ├── client/src/
+│   ├── types/
+│   │   └── index.ts           # Shared TypeScript types (Message interface)
 │   ├── pages/
 │   │   ├── chat.tsx           # Chat page with file upload
 │   │   └── settings.tsx       # Model & vectorstore settings
@@ -180,6 +182,14 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 
 ## Recent Changes (November 22, 2025)
 
+### Code Optimization & Bug Fixes
+- ✅ **Shared Types**: Created `client/src/types/index.ts` to centralize Message interface (eliminates duplication)
+- ✅ **API Configuration**: Made external API URL configurable via `VITE_API_URL` environment variable
+- ✅ **Fixed File Handler Bug**: Resolved stale closure issue in onRemoveFile using state updater pattern
+- ✅ **Improved Error Handling**: Added response.ok checks in vectorstore loading with detailed logging
+- ✅ **Code Consolidation**: Simplified chatInputProps object to reduce duplication without ineffective memoization
+- ✅ **Maintained React Query Benefits**: Kept fetch logic inside mutations for proper caching/retry semantics
+
 ### Chat State Persistence
 - ✅ **React Context Implementation**: Created ChatProvider to maintain state across navigation
 - ✅ **Message Persistence**: Chat messages persist when switching to Settings and back
@@ -210,11 +220,14 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 ## Environment Requirements
 
 ### External API
-The application requires the external API running at `http://localhost:8000` for full functionality:
-- Model management
-- Knowledge base building
-- Vectorstore persistence
-- Chat responses
+The application requires the external API for full functionality:
+- Default URL: `http://localhost:8000`
+- Configurable via `VITE_API_URL` environment variable
+- Functions:
+  - Model management
+  - Knowledge base building
+  - Vectorstore persistence
+  - Chat responses
 
 ### Installed Packages
 Key dependencies:
