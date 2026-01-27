@@ -1,13 +1,9 @@
 import { useState, useRef } from "react";
-import { useLocation } from "wouter";
-import { ArrowLeft, Upload, FileText, CheckCircle, Loader2, Moon, Sun } from "lucide-react";
+import { Upload, FileText, CheckCircle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useTheme } from "@/components/ThemeProvider";
 
 export default function EvidenceAssessmentPage() {
-  const [, setLocation] = useLocation();
-  const { theme, toggleTheme } = useTheme();
   const [files, setFiles] = useState<File[]>([]);
   const [isAssessing, setIsAssessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -43,40 +39,8 @@ export default function EvidenceAssessmentPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="relative h-16 border-b bg-gradient-to-r from-[#654ea3]/30 via-[#7b68b8]/20 to-[#eaafc8]/30 backdrop-blur-sm flex items-center px-6">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setLocation("/")}
-          data-testid="button-back"
-        >
-          <ArrowLeft className="h-5 w-5" />
-        </Button>
-
-        <div className="absolute left-1/2 -translate-x-1/2">
-          <span className="text-xl font-semibold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
-            Evidence File Assessment
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2 ml-auto">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={toggleTheme}
-            data-testid="button-theme-toggle"
-          >
-            {theme === "light" ? (
-              <Moon className="h-5 w-5" />
-            ) : (
-              <Sun className="h-5 w-5" />
-            )}
-          </Button>
-        </div>
-      </header>
-
-      <main className="container mx-auto p-6 max-w-4xl">
+    <div className="h-full overflow-auto">
+      <div className="container mx-auto p-6 max-w-4xl">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -164,7 +128,7 @@ export default function EvidenceAssessmentPage() {
             </div>
           </CardContent>
         </Card>
-      </main>
+      </div>
     </div>
   );
 }

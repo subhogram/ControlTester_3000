@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useLocation } from "wouter";
-import { ArrowLeft, CheckCircle2 } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import ContextFileUpload from "@/components/ContextFileUpload";
@@ -35,7 +34,6 @@ interface VectorstoreInfo {
 }
 
 export default function SettingsPage() {
-  const [, setLocation] = useLocation();
   const [generalContextFiles, setGeneralContextFiles] = useState<ContextFile[]>([]);
   const [companyPolicyFiles, setCompanyPolicyFiles] = useState<ContextFile[]>([]);
   const [selectedModel, setSelectedModel] = useState(() => {
@@ -299,21 +297,8 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-[#654ea3]/20 via-[#8b6dbb]/10 to-[#eaafc8]/20">
+    <div className="h-full overflow-auto">
       <div className="max-w-4xl mx-auto p-8">
-        <div className="mb-8">
-          <Button
-            variant="ghost"
-            onClick={() => setLocation("/")}
-            className="mb-4"
-            data-testid="button-back"
-          >
-            <ArrowLeft className="mr-2 h-4 w-4" />
-            Back to Chat
-          </Button>
-          <h1 className="text-3xl font-bold">Settings</h1>
-        </div>
-
         <div className="space-y-8">
           <Card>
             <CardHeader>

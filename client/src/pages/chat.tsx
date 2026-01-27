@@ -1,17 +1,16 @@
 import { useState } from "react";
-import { useLocation } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useChatContext } from "@/hooks/useChatContext";
-import ChatHeader from "@/components/ChatHeader";
 import ChatMessages from "@/components/ChatMessages";
 import ChatInput from "@/components/ChatInput";
+import { Button } from "@/components/ui/button";
+import { Trash2 } from "lucide-react";
 import type { Message } from "@/types";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function ChatPage() {
-  const [, setLocation] = useLocation();
   const { 
     messages, 
     setMessages, 
@@ -279,14 +278,10 @@ export default function ChatPage() {
   const handleClearChat = () => {
     clearChat();
     toast({
-      title: "✓ Chat Cleared",
+      title: "Chat Cleared",
       description: "All messages and files have been cleared",
       className: "bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800",
     });
-  };
-
-  const handleLogout = () => {
-    console.log("Logout clicked");
   };
 
   // Shared ChatInput props to reduce duplication
@@ -314,16 +309,22 @@ export default function ChatPage() {
   };
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-[#654ea3]/20 via-[#8b6dbb]/10 to-[#eaafc8]/20">
-      <ChatHeader
-        onSettingsClick={() => setLocation("/settings")}
-        onLogout={handleLogout}
-        onClearChat={handleClearChat}
-        hasMessages={messages.length > 0}
-      />
+    <div className="h-full flex flex-col">
+      {messages.length > 0 && (
+        <div className="flex justify-end px-4 py-2 border-b bg-background/50">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleClearChat}
+            data-testid="button-clear-chat"
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Clear Chat
+          </Button>
+        </div>
+      )}
 
       {messages.length === 0 ? (
-        // Centered layout when no messages
         <div className="flex-1 flex flex-col items-center justify-center px-6">
           <div className="w-full max-w-3xl space-y-6">
             <div className="text-center space-y-3">
@@ -339,7 +340,6 @@ export default function ChatPage() {
           </div>
         </div>
       ) : (
-        // Bottom layout when messages exist
         <>
           <ChatMessages messages={messages} />
 

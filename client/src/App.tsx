@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ChatProvider } from "@/contexts/ChatContext";
+import AppLayout from "@/components/AppLayout";
 import ChatPage from "@/pages/chat";
 import SettingsPage from "@/pages/settings";
 import EvidenceAssessmentPage from "@/pages/evidence-assessment";
@@ -12,12 +13,14 @@ import NotFound from "@/pages/not-found";
 
 function Router() {
   return (
-    <Switch>
-      <Route path="/" component={ChatPage} />
-      <Route path="/settings" component={SettingsPage} />
-      <Route path="/evidence-assessment" component={EvidenceAssessmentPage} />
-      <Route component={NotFound} />
-    </Switch>
+    <AppLayout>
+      <Switch>
+        <Route path="/" component={ChatPage} />
+        <Route path="/settings" component={SettingsPage} />
+        <Route path="/evidence-assessment" component={EvidenceAssessmentPage} />
+        <Route component={NotFound} />
+      </Switch>
+    </AppLayout>
   );
 }
 
