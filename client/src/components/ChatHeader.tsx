@@ -1,4 +1,4 @@
-import { Settings, LogOut, User, Moon, Sun, Sparkles, Trash2, FileSearch } from "lucide-react";
+import { Settings, LogOut, User, Moon, Sun, Trash2, FileSearch } from "lucide-react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,16 +50,6 @@ export default function ChatHeader({
         <Button
           variant="ghost"
           size="icon"
-          onClick={() => setLocation("/evidence-assessment")}
-          data-testid="button-evidence-assessment"
-          title="Evidence File Assessment"
-        >
-          <FileSearch className="h-5 w-5" />
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="icon"
           onClick={onClearChat}
           disabled={!hasMessages}
           data-testid="button-clear-chat"
@@ -105,7 +95,11 @@ export default function ChatHeader({
               </Avatar>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem onClick={() => setLocation("/evidence-assessment")} data-testid="menu-evidence-assessment">
+              <FileSearch className="mr-2 h-4 w-4" />
+              Evidence File Assessment
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={onLogout} data-testid="button-logout">
               <LogOut className="mr-2 h-4 w-4" />
               Logout
