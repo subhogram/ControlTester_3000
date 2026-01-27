@@ -31,13 +31,16 @@ export default function AppLayout({ children }: AppLayoutProps) {
 
   return (
     <div className="flex flex-col h-screen bg-gradient-to-br from-[#654ea3]/20 via-[#8b6dbb]/10 to-[#eaafc8]/20">
-      <header className="h-16 border-b bg-gradient-to-r from-[#654ea3]/30 via-[#7b68b8]/20 to-[#eaafc8]/30 backdrop-blur-sm flex items-center justify-between px-6 sticky top-0 z-50">
+      <header className="h-16 border-b bg-gradient-to-r from-[#654ea3]/30 via-[#7b68b8]/20 to-[#eaafc8]/30 backdrop-blur-sm flex items-center px-6 sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <img
             src={logo}
             alt="KPMG logo"
             className="h-8 w-auto object-contain"
           />
+        </div>
+
+        <div className="flex-1 flex justify-center">
           <span className="text-lg font-semibold bg-gradient-to-r from-primary to-primary/70 bg-clip-text text-transparent">
             AI Risk Assessment Agent
           </span>
