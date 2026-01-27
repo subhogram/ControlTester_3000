@@ -646,7 +646,14 @@ class UIManager {
     async handleBuildKB(kind) {
         try {
             const btn = this.$(kind === "general" ? "general-build-btn" : "company-build-btn");
-            if (btn) { btn.disabled = true; btn.textContent = "Building…"; }
+            if (btn) {
+                btn.disabled = true;
+                btn.textContent = "Validating…";
+
+                setTimeout(() => {
+                    btn.textContent = "Building…";
+                }, 3000); // 3 seconds
+            }
             const selected = sessionStorage.getItem("selectedModel");
             const files = this.files[kind];
             const kbType = (kind === "general") ? "global" : "company";
