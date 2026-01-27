@@ -81,8 +81,8 @@ export default function ChatPage() {
         selected_model,
         user_input,
         chat_history,
-        global_kb_path: "global_kb_vectorstore",
-        company_kb_path: "company_kb_vectorstore",
+        global_kb_path: "saved_global_vectorstore",
+        company_kb_path: "saved_company_vectorstore",
       };
       
       if (has_attachments) {
@@ -204,8 +204,8 @@ export default function ChatPage() {
 
     try {
       const loads = [
-        loadVectorstore("global_kb_vectorstore", "global"),
-        loadVectorstore("company_kb_vectorstore", "company"),
+        loadVectorstore("saved_global_vectorstore", "global"),
+        loadVectorstore("saved_company_vectorstore", "company"),
       ];
       
       if (currentHasAttachments) {

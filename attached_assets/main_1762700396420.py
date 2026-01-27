@@ -258,7 +258,7 @@ async def chat(request: ChatRequest):
     try:
         prompt_obj, response_text = chat_with_ai(
             kb_vectorstore=loaded_stores['global'],
-            company_kb_vectorstore=loaded_stores['company'],
+            saved_company_vectorstore=loaded_stores['company'],
             evid_vectorstore=loaded_stores['evidence'],
             chat_attachment_vectorstore=loaded_stores['chat'],
             selected_model=request.selected_model,
@@ -439,7 +439,7 @@ async def build_kb(
 #         assessment_results = assess_evidence_with_kb(
 #             evidence_files=evidence_objs,
 #             kb_vectorstore=global_vectorstore,
-#             company_kb_vectorstore=company_vectorstore,
+#             saved_company_vectorstore=company_vectorstore,
 #             selected_model=selected_model,
 #             max_workers=max_workers
 #         )
@@ -562,7 +562,7 @@ async def assess_evidence(
         assessment_results = assess_evidence_with_kb(
             evidence_files=evidence_objs,
             kb_vectorstore=global_vectorstore,
-            company_kb_vectorstore=company_vectorstore,
+            saved_company_vectorstore=company_vectorstore,
             selected_model=selected_model,
             max_workers=max_workers
         )

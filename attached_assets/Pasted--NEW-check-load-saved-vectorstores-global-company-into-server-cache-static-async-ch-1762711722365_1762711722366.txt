@@ -13,8 +13,8 @@
             }
 
             const checks = [
-                { type: "general", path: "global_kb_vectorstore", kb_type: "global" },
-                { type: "company", path: "company_kb_vectorstore", kb_type: "company" }
+                { type: "general", path: "saved_global_vectorstore", kb_type: "global" },
+                { type: "company", path: "saved_company_vectorstore", kb_type: "company" }
             ];
 
             for (const check of checks) {

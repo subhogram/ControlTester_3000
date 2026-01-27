@@ -50,7 +50,7 @@ COPY --from=builder /app/shared ./shared
 COPY --from=deps /app/node_modules ./node_modules
 
 # Create directories for vectorstore data
-RUN mkdir -p /app/global_kb_vectorstore /app/company_kb_vectorstore /app/chat_attachment_vectorstore /app/chat_attachments
+RUN mkdir -p /app/saved_global_vectorstore /app/saved_company_vectorstore /app/chat_attachment_vectorstore /app/chat_attachments
 
 # Create non-root user
 RUN addgroup --system --gid 1001 nodejs && \

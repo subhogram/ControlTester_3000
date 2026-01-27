@@ -52,11 +52,11 @@ export default function SettingsPage() {
   const { data: globalVectorstore } = useQuery<VectorstoreInfo>({
     queryKey: ["vectorstore/global", selectedModel],
     queryFn: async () => {
-      if (!selectedModel) return { exists: false, path: "global_kb_vectorstore", vector_count: 0 };
+      if (!selectedModel) return { exists: false, path: "saved_global_vectorstore", vector_count: 0 };
       
       // Call external API directly to load vectorstore
       const formData = new URLSearchParams();
-      formData.append("dir_path", "global_kb_vectorstore");
+      formData.append("dir_path", "saved_global_vectorstore");
       formData.append("kb_type", "global");
       formData.append("model_name", selectedModel);
 
@@ -71,14 +71,14 @@ export default function SettingsPage() {
         if (data?.success) {
           return {
             exists: true,
-            path: "global_kb_vectorstore",
+            path: "saved_global_vectorstore",
             vector_count: data.ntotal ?? data.vector_count ?? 0,
             last_modified: new Date().toISOString(),
           };
         }
       }
       
-      return { exists: false, path: "global_kb_vectorstore", vector_count: 0 };
+      return { exists: false, path: "saved_global_vectorstore", vector_count: 0 };
     },
     enabled: !!selectedModel,
   });
@@ -87,11 +87,11 @@ export default function SettingsPage() {
   const { data: companyVectorstore } = useQuery<VectorstoreInfo>({
     queryKey: ["vectorstore/company", selectedModel],
     queryFn: async () => {
-      if (!selectedModel) return { exists: false, path: "company_kb_vectorstore", vector_count: 0 };
+      if (!selectedModel) return { exists: false, path: "saved_company_vectorstore", vector_count: 0 };
       
       // Call external API directly to load vectorstore
       const formData = new URLSearchParams();
-      formData.append("dir_path", "company_kb_vectorstore");
+      formData.append("dir_path", "saved_company_vectorstore");
       formData.append("kb_type", "company");
       formData.append("model_name", selectedModel);
 
@@ -106,14 +106,14 @@ export default function SettingsPage() {
         if (data?.success) {
           return {
             exists: true,
-            path: "company_kb_vectorstore",
+            path: "saved_company_vectorstore",
             vector_count: data.ntotal ?? data.vector_count ?? 0,
             last_modified: new Date().toISOString(),
           };
         }
       }
       
-      return { exists: false, path: "company_kb_vectorstore", vector_count: 0 };
+      return { exists: false, path: "saved_company_vectorstore", vector_count: 0 };
     },
     enabled: !!selectedModel,
   });
@@ -192,7 +192,7 @@ export default function SettingsPage() {
       try {
         const formData = new URLSearchParams();
         formData.append("kb_type", "global");
-        formData.append("dir_path", "global_kb_vectorstore");
+        formData.append("dir_path", "saved_global_vectorstore");
 
         const saveResponse = await fetch("http://localhost:8000/save-vectorstore", {
           method: "POST",
@@ -262,7 +262,7 @@ export default function SettingsPage() {
       try {
         const formData = new URLSearchParams();
         formData.append("kb_type", "company");
-        formData.append("dir_path", "company_kb_vectorstore");
+        formData.append("dir_path", "saved_company_vectorstore");
 
         const saveResponse = await fetch("http://localhost:8000/save-vectorstore", {
           method: "POST",

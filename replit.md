@@ -30,13 +30,13 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 
 #### General Context (Global Knowledge Base)
 - Upload files to build global knowledge base
-- Auto-saves to `global_kb_vectorstore/` folder
+- Auto-saves to `saved_global_vectorstore/` folder
 - Green "Vectorstore Ready" badge when available
 - Auto-loads on Settings page when model is selected
 
 #### Company Policy Context
 - Upload files for company-specific knowledge
-- Auto-saves to `company_kb_vectorstore/` folder
+- Auto-saves to `saved_company_vectorstore/` folder
 - Green "Vectorstore Ready" badge when available
 - Auto-loads on Settings page when model is selected
 
@@ -65,8 +65,8 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
 ### Key Directories
 ```
 ├── chat_attachments/          # Uploaded chat files
-├── global_kb_vectorstore/     # General context vectorstore
-├── company_kb_vectorstore/    # Company policy vectorstore
+├── saved_global_vectorstore/     # General context vectorstore
+├── saved_company_vectorstore/    # Company policy vectorstore
 ├── client/src/
 │   ├── types/
 │   │   └── index.ts           # Shared TypeScript types (Message interface)
@@ -132,8 +132,8 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
    - Shows green "Ready" badge in upload bar
 4. User sends chat message:
    - **Pre-chat vectorstore loading**: Frontend loads ALL vectorstores into memory
-     - Calls `/load-vectorstore` for `global_kb_vectorstore` (kb_type=global)
-     - Calls `/load-vectorstore` for `company_kb_vectorstore` (kb_type=company)
+     - Calls `/load-vectorstore` for `saved_global_vectorstore` (kb_type=global)
+     - Calls `/load-vectorstore` for `saved_company_vectorstore` (kb_type=company)
      - Calls `/load-vectorstore` for `chat_attachment_vectorstore` (kb_type=chat) **if attachments exist**
      - Uses `Promise.allSettled` for parallel loading (continues even if one fails)
    - Frontend calls `http://localhost:8000/chat` directly (no backend proxy)
@@ -147,8 +147,8 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
        {"role": "user", "content": "previous question"},
        {"role": "assistant", "content": "previous answer"}
      ],
-     "global_kb_path": "global_kb_vectorstore",
-     "company_kb_path": "company_kb_vectorstore",
+     "global_kb_path": "saved_global_vectorstore",
+     "company_kb_path": "saved_company_vectorstore",
      "chat_kb_path": "chat_attachment_vectorstore"  // if has_attachments
    }
    ```
@@ -163,13 +163,13 @@ Agent-Assess is a full-stack AI assessment application with dynamic model select
    - API: `POST http://localhost:8000/build-knowledge-base`
    - Parameters: `batch_size=15`, `delay_between_batches=0.2`, `max_retries=3`
    - Creates vectorstore:
-     - **Settings (global)**: Creates `global_kb_vectorstore/` (saved to disk)
-     - **Settings (company)**: Creates `company_kb_vectorstore/` (saved to disk)
+     - **Settings (global)**: Creates `saved_global_vectorstore/` (saved to disk)
+     - **Settings (company)**: Creates `saved_company_vectorstore/` (saved to disk)
      - **Chat**: Creates `chat_attachment_vectorstore/` (IN-MEMORY ONLY, not saved)
 
 2. **Save Vectorstore** (Settings only)
    - API: `POST http://localhost:8000/save-vectorstore`
-   - Saves to disk: `global_kb_vectorstore/` or `company_kb_vectorstore/`
+   - Saves to disk: `saved_global_vectorstore/` or `saved_company_vectorstore/`
    - **NOT called for chat attachments** - they remain in memory only
 
 3. **Load Vectorstore** (Settings - Auto-load on model selection)

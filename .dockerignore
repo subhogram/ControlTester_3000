@@ -52,7 +52,7 @@ replit.md
 *.md
 
 # Vectorstore data (not needed in container)
-global_kb_vectorstore
-company_kb_vectorstore
+saved_global_vectorstore
+saved_company_vectorstore
 chat_attachment_vectorstore
 chat_attachments
