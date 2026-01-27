@@ -38,56 +38,93 @@ export default function EvidenceAssessmentPage() {
 
   const handleAssess = async () => {
     if (files.length === 0) return;
+    
+    // Get selected model from localStorage
+    const selectedModel = localStorage.getItem("selectedModel");
+    if (!selectedModel) {
+      toast({
+        title: "Model Required",
+        description: "Please select an AI model in Settings before running an assessment.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsAssessing(true);
     setReportData(null);
-    setAssessmentStatus("Uploading files...");
+    setAssessmentStatus("Uploading evidence files...");
 
     try {
       // Step 1: Upload files and assess evidence
       const formData = new FormData();
+      formData.append("selected_model", selectedModel);
+      formData.append("max_workers", "4");
       files.forEach((file) => {
-        formData.append("files", file);
+        formData.append("evidence_files", file);
       });
 
-      setAssessmentStatus("Assessing evidence...");
+      setAssessmentStatus("Assessing evidence against knowledge bases...");
       const assessResponse = await fetch(`${API_URL}/assess-evidence`, {
         method: "POST",
         body: formData,
       });
 
       if (!assessResponse.ok) {
-        throw new Error("Failed to assess evidence");
+        const errorData = await assessResponse.json().catch(() => ({}));
+        throw new Error(errorData.detail || "Failed to assess evidence");
       }
 
       const assessResult = await assessResponse.json();
+      
+      if (!assessResult.success) {
+        throw new Error(assessResult.error_details || "Assessment failed");
+      }
 
       // Step 2: Generate summary report
-      setAssessmentStatus("Generating summary report...");
-      const summaryResponse = await fetch(`${API_URL}/generate-summary`, {
+      setAssessmentStatus("Generating executive summary...");
+      const summaryParams = new URLSearchParams();
+      summaryParams.append("selected_model", selectedModel);
+      
+      const summaryResponse = await fetch(`${API_URL}/generate-summary?${summaryParams}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          assessment_id: assessResult.assessment_id,
-          assessment_data: assessResult,
-        }),
+        body: JSON.stringify(assessResult.processing_summary?.assessment_results || []),
       });
 
       if (!summaryResponse.ok) {
         throw new Error("Failed to generate summary");
       }
 
-      // Get the report as a blob for download
-      const contentType = summaryResponse.headers.get("content-type");
-      if (contentType && contentType.includes("application/pdf")) {
-        const blob = await summaryResponse.blob();
-        setReportData(blob);
-        setReportFilename("assessment-report.pdf");
+      const summaryResult = await summaryResponse.json();
+
+      // Step 3: Download the report PDF if workbook_path is available
+      if (assessResult.workbook_path) {
+        setAssessmentStatus("Preparing report for download...");
+        const filename = assessResult.workbook_path.split("/").pop() || "assessment-report.pdf";
+        
+        const downloadResponse = await fetch(`${API_URL}/download-report?filename=${encodeURIComponent(filename)}`);
+        
+        if (downloadResponse.ok) {
+          const blob = await downloadResponse.blob();
+          setReportData(blob);
+          setReportFilename(filename);
+        } else {
+          // If download fails, still show success with summary data
+          const blob = new Blob([JSON.stringify({
+            assessment: assessResult,
+            summary: summaryResult
+          }, null, 2)], { type: "application/json" });
+          setReportData(blob);
+          setReportFilename("assessment-report.json");
+        }
       } else {
-        const summaryResult = await summaryResponse.json();
-        // If JSON response, create a text blob
-        const blob = new Blob([JSON.stringify(summaryResult, null, 2)], { type: "application/json" });
+        // No workbook path, create JSON report
+        const blob = new Blob([JSON.stringify({
+          assessment: assessResult,
+          summary: summaryResult
+        }, null, 2)], { type: "application/json" });
         setReportData(blob);
         setReportFilename("assessment-report.json");
       }
@@ -95,7 +132,9 @@ export default function EvidenceAssessmentPage() {
       setAssessmentStatus("Assessment complete!");
       toast({
         title: "Assessment Complete",
-        description: "Your evidence has been assessed. You can now download the report.",
+        description: summaryResult.executive_summary 
+          ? "Your evidence has been assessed. You can now download the report."
+          : "Assessment completed. Download the report for details.",
       });
     } catch (error) {
       console.error("Assessment error:", error);
