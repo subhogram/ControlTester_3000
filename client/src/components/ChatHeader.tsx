@@ -1,4 +1,5 @@
-import { Settings, LogOut, User, Moon, Sun, Sparkles, Trash2 } from "lucide-react";
+import { Settings, LogOut, User, Moon, Sun, Sparkles, Trash2, FileSearch } from "lucide-react";
+import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -24,6 +25,7 @@ export default function ChatHeader({
   hasMessages,
 }: ChatHeaderProps) {
   const { theme, toggleTheme } = useTheme();
+  const [, setLocation] = useLocation();
 
   return (
     <header className="relative h-16 border-b bg-gradient-to-r from-[#654ea3]/30 via-[#7b68b8]/20 to-[#eaafc8]/30 backdrop-blur-sm flex items-center px-6">
@@ -45,6 +47,16 @@ export default function ChatHeader({
         </div>
       
       <div className="flex items-center gap-2 ml-auto z-10">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => setLocation("/evidence-assessment")}
+          data-testid="button-evidence-assessment"
+          title="Evidence File Assessment"
+        >
+          <FileSearch className="h-5 w-5" />
+        </Button>
+
         <Button
           variant="ghost"
           size="icon"
