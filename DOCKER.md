@@ -1,6 +1,6 @@
 # Docker Setup Guide
 
-This document explains how to run Agent-Assess using Docker.
+This document explains how to run KPMG AI risk assessment using Docker.
 
 ## Quick Start
 
