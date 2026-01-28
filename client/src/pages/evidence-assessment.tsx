@@ -64,6 +64,11 @@ export default function EvidenceAssessmentPage() {
     setAssessmentStatus("Uploading evidence files...");
 
     try {
+      // Step 0: Validate uploaded evidences (dummy process)
+      console.log("Step 0: Validating uploaded evidences...");
+      setAssessmentStatus("Validating uploaded evidences...");
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+
       // Step 1: Upload files and assess evidence
       console.log("Step 1: Starting evidence assessment...");
       const formData = new FormData();
