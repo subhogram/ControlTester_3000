@@ -70,7 +70,7 @@ export default function EvidenceAssessmentPage() {
       await new Promise((resolve) => setTimeout(resolve, 5000));
 
       // Step 1: Upload files and assess evidence
-      console.log("Step 1: Starting evidence assessment...");
+      console.log("Step 1: Starting AI-Risk assessment...");
       const formData = new FormData();
       formData.append("selected_model", selectedModel);
       formData.append("max_workers", "4");
@@ -206,10 +206,10 @@ export default function EvidenceAssessmentPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <FileText className="h-5 w-5" />
-              Upload Evidence Files
+              Upload Files
             </CardTitle>
             <CardDescription>
-              Upload your evidence files for AI-powered assessment and analysis
+              Upload your files for AI-powered risk assessment and analysis
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">

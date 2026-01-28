@@ -17,7 +17,7 @@ interface AppLayoutProps {
 
 const tabs = [
   { title: "Chat", path: "/", icon: MessageSquare },
-  { title: "Evidence Assessment", path: "/evidence-assessment", icon: FileSearch },
+  { title: "AI-Risk Assessment", path: "/evidence-assessment", icon: FileSearch },
   { title: "Settings", path: "/settings", icon: Settings },
 ];
 
