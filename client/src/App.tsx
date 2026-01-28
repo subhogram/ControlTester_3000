@@ -5,6 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ChatProvider } from "@/contexts/ChatContext";
+import { EvidenceProvider } from "@/contexts/EvidenceContext";
 import AppLayout from "@/components/AppLayout";
 import ChatPage from "@/pages/chat";
 import SettingsPage from "@/pages/settings";
@@ -30,8 +31,10 @@ function App() {
       <ThemeProvider>
         <TooltipProvider>
           <ChatProvider>
-            <Toaster />
-            <Router />
+            <EvidenceProvider>
+              <Toaster />
+              <Router />
+            </EvidenceProvider>
           </ChatProvider>
         </TooltipProvider>
       </ThemeProvider>

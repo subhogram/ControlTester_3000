@@ -1,17 +1,26 @@
-import { useState, useRef } from "react";
+import { useRef } from "react";
 import { Upload, FileText, CheckCircle, Loader2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { useEvidenceContext } from "@/contexts/EvidenceContext";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function EvidenceAssessmentPage() {
-  const [files, setFiles] = useState<File[]>([]);
-  const [isAssessing, setIsAssessing] = useState(false);
-  const [assessmentStatus, setAssessmentStatus] = useState<string>("");
-  const [reportData, setReportData] = useState<Blob | null>(null);
-  const [reportFilename, setReportFilename] = useState<string>("assessment-report.pdf");
+  const {
+    files,
+    setFiles,
+    isAssessing,
+    setIsAssessing,
+    assessmentStatus,
+    setAssessmentStatus,
+    reportData,
+    setReportData,
+    reportFilename,
+    setReportFilename,
+    clearEvidence,
+  } = useEvidenceContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
@@ -287,11 +296,7 @@ export default function EvidenceAssessmentPage() {
               )}
               <Button
                 variant="outline"
-                onClick={() => {
-                  setFiles([]);
-                  setReportData(null);
-                  setAssessmentStatus("");
-                }}
+                onClick={clearEvidence}
                 disabled={files.length === 0 && !reportData}
                 data-testid="button-clear-files"
               >
