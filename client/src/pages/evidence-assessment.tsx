@@ -379,7 +379,7 @@ export default function EvidenceAssessmentPage() {
           <div className="space-y-6">
             <div className="text-center mb-8">
               <h2 className="text-2xl font-bold bg-gradient-to-r from-purple-500 to-pink-500 bg-clip-text text-transparent">
-                Multi-Agent Assessment System
+                Analyzing through AI agents
               </h2>
               <p className="text-muted-foreground mt-2">
                 Processing {files.length} evidence file{files.length !== 1 ? "s" : ""} through AI agents
