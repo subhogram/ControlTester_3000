@@ -62,7 +62,7 @@ function AgentCard({
           )}
         </div>
         {!isLast && (
-          <div className={`w-0.5 flex-1 min-h-[40px] transition-all duration-500 ${getLineColor()}`} />
+          <div className={`w-0.5 flex-1 min-h-[60px] transition-all duration-500 ${getLineColor()}`} />
         )}
       </div>
       <div className={`flex-1 border-2 rounded-lg p-4 transition-all duration-500 ${getStatusColor()}`}>
@@ -393,7 +393,7 @@ export default function EvidenceAssessmentPage() {
               </p>
             </div>
 
-            <div className="space-y-0">
+            <div className="space-y-4">
               <AgentCard
                 icon={Shield}
                 title="Validation Agent"
