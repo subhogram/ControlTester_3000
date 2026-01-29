@@ -694,10 +694,10 @@ You have been designed to provide accurate, actionable guidance based on availab
 
 **Response Format:**
 - For policy questions: Quote relevant sections and provide interpretation
-- For assessments: Provide structured analysis with findings and recommendations
+- For assessments: Provide structured analysis with findings and recommendations. ONLY perform an assessment if logs, evidence, controls, or incidents are explicitly provided
 - For comparisons: Use tables to show differences
 - For follow-ups: Build on previous context seamlessly
-- For small talk: Reply with very small generic replies
+- If the user message is a greeting, casual message, or unrelated to security analysis, DO NOT perform an assessment. Instead, respond with a short clarification question.
 
 Your comprehensive response:"""
 
