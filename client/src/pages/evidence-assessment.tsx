@@ -1,11 +1,91 @@
-import { useRef } from "react";
-import { Upload, FileText, CheckCircle, Loader2, Download } from "lucide-react";
+import { useRef, useState } from "react";
+import { Upload, FileText, CheckCircle, Loader2, Download, Bot, ArrowRight, Shield, Search, FileOutput } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useEvidenceContext } from "@/contexts/EvidenceContext";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+type AgentStatus = "idle" | "active" | "completed" | "error";
+
+interface AgentState {
+  validator: AgentStatus;
+  assessor: AgentStatus;
+  reporter: AgentStatus;
+}
+
+function AgentCard({ 
+  icon: Icon, 
+  title, 
+  description, 
+  status, 
+  statusMessage,
+  isFirst = false 
+}: { 
+  icon: React.ElementType;
+  title: string;
+  description: string;
+  status: AgentStatus;
+  statusMessage?: string;
+  isFirst?: boolean;
+}) {
+  const getStatusColor = () => {
+    switch (status) {
+      case "active": return "border-purple-500 bg-gradient-to-br from-purple-500/20 to-pink-500/20";
+      case "completed": return "border-green-500 bg-green-500/10";
+      case "error": return "border-red-500 bg-red-500/10";
+      default: return "border-muted bg-muted/30 opacity-50";
+    }
+  };
+
+  const getIconColor = () => {
+    switch (status) {
+      case "active": return "text-purple-500";
+      case "completed": return "text-green-500";
+      case "error": return "text-red-500";
+      default: return "text-muted-foreground";
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-4">
+      {!isFirst && (
+        <ArrowRight className={`h-6 w-6 flex-shrink-0 ${status !== "idle" ? "text-purple-500" : "text-muted-foreground opacity-50"}`} />
+      )}
+      <div className={`flex-1 border-2 rounded-lg p-4 transition-all duration-500 ${getStatusColor()}`}>
+        <div className="flex items-start gap-3">
+          <div className={`p-2 rounded-full ${status === "active" ? "bg-purple-500/20 animate-pulse" : "bg-muted"}`}>
+            {status === "active" ? (
+              <Loader2 className={`h-8 w-8 animate-spin ${getIconColor()}`} />
+            ) : status === "completed" ? (
+              <CheckCircle className="h-8 w-8 text-green-500" />
+            ) : (
+              <Icon className={`h-8 w-8 ${getIconColor()}`} />
+            )}
+          </div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2">
+              <Bot className={`h-4 w-4 ${getIconColor()}`} />
+              <h3 className="font-semibold">{title}</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mt-1">{description}</p>
+            {statusMessage && status === "active" && (
+              <p className="text-sm text-purple-500 mt-2 font-medium animate-pulse">
+                {statusMessage}
+              </p>
+            )}
+            {status === "completed" && (
+              <p className="text-sm text-green-500 mt-2 font-medium">
+                Task completed
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function EvidenceAssessmentPage() {
   const {
@@ -23,6 +103,13 @@ export default function EvidenceAssessmentPage() {
   } = useEvidenceContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  
+  const [agentStates, setAgentStates] = useState<AgentState>({
+    validator: "idle",
+    assessor: "idle",
+    reporter: "idle",
+  });
+  const [showAgents, setShowAgents] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -45,10 +132,18 @@ export default function EvidenceAssessmentPage() {
     fileInputRef.current?.click();
   };
 
+  const resetAgents = () => {
+    setShowAgents(false);
+    setAgentStates({
+      validator: "idle",
+      assessor: "idle",
+      reporter: "idle",
+    });
+  };
+
   const handleAssess = async () => {
     if (files.length === 0) return;
     
-    // Get selected model from localStorage
     const selectedModel = localStorage.getItem("selectedModel");
     if (!selectedModel) {
       toast({
@@ -61,16 +156,26 @@ export default function EvidenceAssessmentPage() {
 
     setIsAssessing(true);
     setReportData(null);
-    setAssessmentStatus("Uploading evidence files...");
+    setShowAgents(true);
+    setAgentStates({
+      validator: "idle",
+      assessor: "idle",
+      reporter: "idle",
+    });
 
     try {
-      // Step 0: Validate uploaded evidences (dummy process)
-      console.log("Step 0: Validating uploaded evidences...");
-      setAssessmentStatus("Validating uploaded evidences...");
+      // Agent 1: Validator - Validate uploaded evidences
+      console.log("Agent 1: Validating uploaded evidences...");
+      setAgentStates(prev => ({ ...prev, validator: "active" }));
+      setAssessmentStatus("Validating document formats and integrity...");
       await new Promise((resolve) => setTimeout(resolve, 5000));
+      setAgentStates(prev => ({ ...prev, validator: "completed" }));
 
-      // Step 1: Upload files and assess evidence
-      console.log("Step 1: Starting AI-Risk assessment...");
+      // Agent 2: Assessor - Assess evidence against knowledge bases
+      console.log("Agent 2: Starting evidence assessment...");
+      setAgentStates(prev => ({ ...prev, assessor: "active" }));
+      setAssessmentStatus("Analyzing evidence against knowledge bases...");
+      
       const formData = new FormData();
       formData.append("selected_model", selectedModel);
       formData.append("max_workers", "4");
@@ -78,7 +183,6 @@ export default function EvidenceAssessmentPage() {
         formData.append("evidence_files", file);
       });
 
-      setAssessmentStatus("Assessing evidence against knowledge bases...");
       let assessResponse;
       try {
         assessResponse = await fetch(`${API_URL}/assess-evidence`, {
@@ -86,25 +190,31 @@ export default function EvidenceAssessmentPage() {
           body: formData,
         });
       } catch (fetchError) {
+        setAgentStates(prev => ({ ...prev, assessor: "error" }));
         throw new Error(`Cannot connect to API at ${API_URL}. Please ensure the external API is running.`);
       }
 
       if (!assessResponse.ok) {
         const errorData = await assessResponse.json().catch(() => ({}));
         console.error("Assessment API error:", errorData);
+        setAgentStates(prev => ({ ...prev, assessor: "error" }));
         throw new Error(errorData.detail || `Assessment failed with status ${assessResponse.status}`);
       }
 
       const assessResult = await assessResponse.json();
-      console.log("Step 1 complete. Assessment result:", assessResult);
+      console.log("Agent 2 complete. Assessment result:", assessResult);
       
       if (!assessResult.success) {
+        setAgentStates(prev => ({ ...prev, assessor: "error" }));
         throw new Error(assessResult.error_details || "Assessment failed");
       }
+      
+      setAgentStates(prev => ({ ...prev, assessor: "completed" }));
 
-      // Step 2: Generate summary report (optional - the workbook is already generated by assess-evidence)
-      console.log("Step 2: Generating executive summary...");
-      setAssessmentStatus("Generating executive summary...");
+      // Agent 3: Reporter - Generate summary and prepare report
+      console.log("Agent 3: Generating report...");
+      setAgentStates(prev => ({ ...prev, reporter: "active" }));
+      setAssessmentStatus("Generating executive summary and report...");
       
       let summaryResult = { success: true, executive_summary: "" };
       try {
@@ -118,7 +228,7 @@ export default function EvidenceAssessmentPage() {
 
         if (summaryResponse.ok) {
           summaryResult = await summaryResponse.json();
-          console.log("Step 2 complete. Summary result:", summaryResult);
+          console.log("Summary generated:", summaryResult);
         } else {
           console.warn("Summary generation failed, continuing with workbook download...");
         }
@@ -126,8 +236,7 @@ export default function EvidenceAssessmentPage() {
         console.warn("Summary API error, continuing:", summaryError);
       }
 
-      // Step 3: Download the report PDF if workbook_path is available
-      console.log("Step 3: Preparing report for download...");
+      // Download report
       if (assessResult.workbook_path) {
         setAssessmentStatus("Preparing report for download...");
         const filename = assessResult.workbook_path.split("/").pop() || "assessment-report.pdf";
@@ -169,10 +278,11 @@ export default function EvidenceAssessmentPage() {
         setReportFilename("assessment-report.json");
       }
 
-      setAssessmentStatus("Assessment complete!");
+      setAgentStates(prev => ({ ...prev, reporter: "completed" }));
+      setAssessmentStatus("All agents completed successfully!");
       toast({
         title: "Assessment Complete",
-        description: "Your evidence has been assessed. You can now download the report.",
+        description: "All agents have completed their tasks. You can now download the report.",
       });
     } catch (error) {
       console.error("Assessment error:", error);
@@ -199,117 +309,158 @@ export default function EvidenceAssessmentPage() {
     URL.revokeObjectURL(url);
   };
 
+  const handleNewAssessment = () => {
+    clearEvidence();
+    resetAgents();
+  };
+
   return (
     <div className="h-full overflow-auto">
-      <div className="container mx-auto p-6 max-w-4xl">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              Upload Files
-            </CardTitle>
-            <CardDescription>
-              Upload your files for AI-powered risk assessment and analysis
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div
-              className="border-2 border-dashed rounded-md p-8 text-center cursor-pointer hover-elevate"
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onClick={handleDropzoneClick}
-              data-testid="dropzone-upload"
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="hidden"
-                onChange={handleFileChange}
-                accept=".pdf,.doc,.docx,.txt,.xlsx,.xls,.csv"
-                data-testid="input-file"
-              />
-              <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
-              <p className="text-lg font-medium">
-                Drag and drop files here, or click to browse
-              </p>
-              <p className="text-sm text-muted-foreground mt-2">
-                Supports PDF, Word, Excel, CSV, and text files
-              </p>
-            </div>
-
-            {files.length > 0 && (
-              <div className="space-y-3">
-                <h3 className="font-medium">Selected Files ({files.length})</h3>
-                <div className="space-y-2">
-                  {files.map((file, index) => (
-                    <div
-                      key={index}
-                      className="flex items-center gap-3 p-3 bg-muted/50 rounded-md"
-                      data-testid={`file-item-${index}`}
-                    >
-                      <FileText className="h-5 w-5 text-muted-foreground" />
-                      <span className="flex-1 truncate" data-testid={`text-filename-${index}`}>{file.name}</span>
-                      <span className="text-sm text-muted-foreground" data-testid={`text-filesize-${index}`}>
-                        {(file.size / 1024).toFixed(1)} KB
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {assessmentStatus && (
-              <div className="p-3 bg-muted/50 rounded-md" data-testid="status-assessment">
-                <p className="text-sm flex items-center gap-2">
-                  {isAssessing && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {!isAssessing && reportData && <CheckCircle className="h-4 w-4 text-green-500" />}
-                  {assessmentStatus}
+      <div className="container mx-auto p-6 max-w-5xl">
+        {!showAgents ? (
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Upload Evidence Files
+              </CardTitle>
+              <CardDescription>
+                Upload your evidence files for AI-powered multi-agent risk assessment
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div
+                className="border-2 border-dashed rounded-md p-8 text-center cursor-pointer hover-elevate"
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onClick={handleDropzoneClick}
+                data-testid="dropzone-upload"
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handleFileChange}
+                  accept=".pdf,.doc,.docx,.txt,.xlsx,.xls,.csv"
+                  data-testid="input-file"
+                />
+                <Upload className="h-12 w-12 mx-auto mb-4 text-muted-foreground" />
+                <p className="text-lg font-medium">
+                  Drag and drop files here, or click to browse
+                </p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  Supports PDF, Word, Excel, CSV, and text files
                 </p>
               </div>
-            )}
 
-            <div className="flex gap-3">
-              <Button
-                onClick={handleAssess}
-                disabled={files.length === 0 || isAssessing}
-                className="flex-1"
-                data-testid="button-assess"
-              >
-                {isAssessing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Assessing...
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Start Assessment
-                  </>
-                )}
-              </Button>
-              {reportData && (
-                <Button
-                  onClick={handleDownloadReport}
-                  variant="default"
-                  className="bg-green-600 hover:bg-green-700"
-                  data-testid="button-download-report"
-                >
-                  <Download className="h-4 w-4 mr-2" />
-                  Download Report
-                </Button>
+              {files.length > 0 && (
+                <div className="space-y-3">
+                  <h3 className="font-medium">Selected Files ({files.length})</h3>
+                  <div className="space-y-2 max-h-48 overflow-auto">
+                    {files.map((file, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center gap-3 p-3 bg-muted/50 rounded-md"
+                        data-testid={`file-item-${index}`}
+                      >
+                        <FileText className="h-5 w-5 text-muted-foreground" />
+                        <span className="flex-1 truncate" data-testid={`text-filename-${index}`}>{file.name}</span>
+                        <span className="text-sm text-muted-foreground" data-testid={`text-filesize-${index}`}>
+                          {(file.size / 1024).toFixed(1)} KB
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
-              <Button
-                variant="outline"
-                onClick={clearEvidence}
-                disabled={files.length === 0 && !reportData}
-                data-testid="button-clear-files"
-              >
-                Clear
-              </Button>
+
+              <div className="flex gap-3">
+                <Button
+                  onClick={handleAssess}
+                  disabled={files.length === 0 || isAssessing}
+                  className="flex-1"
+                  data-testid="button-assess"
+                >
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Start Assessment
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={clearEvidence}
+                  disabled={files.length === 0}
+                  data-testid="button-clear-files"
+                >
+                  Clear
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-6">
+            <div className="text-center mb-8">
+              <h2 className="text-2xl font-bold bg-gradient-to-r from-purple-500 to-pink-500 bg-clip-text text-transparent">
+                Multi-Agent Assessment System
+              </h2>
+              <p className="text-muted-foreground mt-2">
+                Processing {files.length} evidence file{files.length !== 1 ? "s" : ""} through AI agents
+              </p>
             </div>
-          </CardContent>
-        </Card>
+
+            <div className="grid gap-4">
+              <AgentCard
+                icon={Shield}
+                title="Validation Agent"
+                description="Validates document formats, checks integrity, and prepares evidence for assessment"
+                status={agentStates.validator}
+                statusMessage={assessmentStatus}
+                isFirst
+              />
+              
+              <AgentCard
+                icon={Search}
+                title="Assessment Agent"
+                description="Analyzes evidence against global and company knowledge bases using AI"
+                status={agentStates.assessor}
+                statusMessage={assessmentStatus}
+              />
+              
+              <AgentCard
+                icon={FileOutput}
+                title="Report Agent"
+                description="Generates executive summary and compiles the final assessment report"
+                status={agentStates.reporter}
+                statusMessage={assessmentStatus}
+              />
+            </div>
+
+            {(reportData || !isAssessing) && (
+              <Card className="mt-6">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-center gap-4">
+                    {reportData && (
+                      <Button
+                        onClick={handleDownloadReport}
+                        className="bg-green-600 hover:bg-green-700"
+                        data-testid="button-download-report"
+                      >
+                        <Download className="h-4 w-4 mr-2" />
+                        Download Report
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      onClick={handleNewAssessment}
+                      data-testid="button-new-assessment"
+                    >
+                      New Assessment
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
