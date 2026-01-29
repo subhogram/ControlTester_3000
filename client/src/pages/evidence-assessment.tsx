@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { Upload, FileText, CheckCircle, Loader2, Download, Bot, ArrowRight, Shield, Search, FileOutput } from "lucide-react";
+import { Upload, FileText, CheckCircle, Loader2, Download, Bot, Shield, Search, FileOutput } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
@@ -13,14 +13,14 @@ function AgentCard({
   description, 
   status, 
   statusMessage,
-  isFirst = false 
+  isLast = false 
 }: { 
   icon: React.ElementType;
   title: string;
   description: string;
   status: AgentStatus;
   statusMessage?: string;
-  isFirst?: boolean;
+  isLast?: boolean;
 }) {
   const getStatusColor = () => {
     switch (status) {
@@ -40,40 +40,47 @@ function AgentCard({
     }
   };
 
+  const getLineColor = () => {
+    switch (status) {
+      case "active": return "bg-purple-500";
+      case "completed": return "bg-green-500";
+      case "error": return "bg-red-500";
+      default: return "bg-muted-foreground/30";
+    }
+  };
+
   return (
-    <div className="flex items-center gap-4">
-      {!isFirst && (
-        <ArrowRight className={`h-6 w-6 flex-shrink-0 ${status !== "idle" ? "text-purple-500" : "text-muted-foreground opacity-50"}`} />
-      )}
-      <div className={`flex-1 border-2 rounded-lg p-4 transition-all duration-500 ${getStatusColor()}`}>
-        <div className="flex items-start gap-3">
-          <div className={`p-2 rounded-full ${status === "active" ? "bg-purple-500/20 animate-pulse" : "bg-muted"}`}>
-            {status === "active" ? (
-              <Loader2 className={`h-8 w-8 animate-spin ${getIconColor()}`} />
-            ) : status === "completed" ? (
-              <CheckCircle className="h-8 w-8 text-green-500" />
-            ) : (
-              <Icon className={`h-8 w-8 ${getIconColor()}`} />
-            )}
-          </div>
-          <div className="flex-1">
-            <div className="flex items-center gap-2">
-              <Bot className={`h-4 w-4 ${getIconColor()}`} />
-              <h3 className="font-semibold">{title}</h3>
-            </div>
-            <p className="text-sm text-muted-foreground mt-1">{description}</p>
-            {statusMessage && status === "active" && (
-              <p className="text-sm text-purple-500 mt-2 font-medium animate-pulse">
-                {statusMessage}
-              </p>
-            )}
-            {status === "completed" && (
-              <p className="text-sm text-green-500 mt-2 font-medium">
-                Task completed
-              </p>
-            )}
-          </div>
+    <div className="flex">
+      <div className="flex flex-col items-center mr-4">
+        <div className={`w-12 h-12 rounded-full flex items-center justify-center border-2 transition-all duration-500 ${status === "active" ? "border-purple-500 bg-purple-500/20 animate-pulse" : status === "completed" ? "border-green-500 bg-green-500/20" : status === "error" ? "border-red-500 bg-red-500/20" : "border-muted bg-muted"}`}>
+          {status === "active" ? (
+            <Loader2 className={`h-6 w-6 animate-spin ${getIconColor()}`} />
+          ) : status === "completed" ? (
+            <CheckCircle className="h-6 w-6 text-green-500" />
+          ) : (
+            <Icon className={`h-6 w-6 ${getIconColor()}`} />
+          )}
         </div>
+        {!isLast && (
+          <div className={`w-0.5 flex-1 min-h-[40px] transition-all duration-500 ${getLineColor()}`} />
+        )}
+      </div>
+      <div className={`flex-1 border-2 rounded-lg p-4 transition-all duration-500 ${getStatusColor()}`}>
+        <div className="flex items-center gap-2 mb-1">
+          <Bot className={`h-4 w-4 ${getIconColor()}`} />
+          <h3 className="font-semibold">{title}</h3>
+        </div>
+        <p className="text-sm text-muted-foreground">{description}</p>
+        {statusMessage && status === "active" && (
+          <p className="text-sm text-purple-500 mt-2 font-medium animate-pulse">
+            {statusMessage}
+          </p>
+        )}
+        {status === "completed" && (
+          <p className="text-sm text-green-500 mt-2 font-medium">
+            Task completed
+          </p>
+        )}
       </div>
     </div>
   );
@@ -386,14 +393,13 @@ export default function EvidenceAssessmentPage() {
               </p>
             </div>
 
-            <div className="grid gap-4">
+            <div className="space-y-0">
               <AgentCard
                 icon={Shield}
                 title="Validation Agent"
                 description="Validates document formats, checks integrity, and prepares evidence for assessment"
                 status={agentStates.validator}
                 statusMessage={assessmentStatus}
-                isFirst
               />
               
               <AgentCard
@@ -410,6 +416,7 @@ export default function EvidenceAssessmentPage() {
                 description="Generates executive summary and compiles the final assessment report"
                 status={agentStates.reporter}
                 statusMessage={assessmentStatus}
+                isLast
               />
             </div>
 
