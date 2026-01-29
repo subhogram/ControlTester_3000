@@ -421,29 +421,25 @@ export default function EvidenceAssessmentPage() {
             </div>
 
             {(reportData || !isAssessing) && (
-              <Card className="mt-6">
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-center gap-4">
-                    {reportData && (
-                      <Button
-                        onClick={handleDownloadReport}
-                        className="bg-green-600 hover:bg-green-700"
-                        data-testid="button-download-report"
-                      >
-                        <Download className="h-4 w-4 mr-2" />
-                        Download Report
-                      </Button>
-                    )}
-                    <Button
-                      variant="outline"
-                      onClick={handleNewAssessment}
-                      data-testid="button-new-assessment"
-                    >
-                      New Assessment
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <div className="flex items-center justify-center gap-4 mt-6">
+                {reportData && (
+                  <Button
+                    onClick={handleDownloadReport}
+                    className="bg-green-600 hover:bg-green-700"
+                    data-testid="button-download-report"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download Report
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  onClick={handleNewAssessment}
+                  data-testid="button-new-assessment"
+                >
+                  New Assessment
+                </Button>
+              </div>
             )}
           </div>
         )}
