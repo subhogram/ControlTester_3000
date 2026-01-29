@@ -1,19 +1,11 @@
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import { Upload, FileText, CheckCircle, Loader2, Download, Bot, ArrowRight, Shield, Search, FileOutput } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { useEvidenceContext } from "@/contexts/EvidenceContext";
+import { useEvidenceContext, AgentStatus } from "@/contexts/EvidenceContext";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
-
-type AgentStatus = "idle" | "active" | "completed" | "error";
-
-interface AgentState {
-  validator: AgentStatus;
-  assessor: AgentStatus;
-  reporter: AgentStatus;
-}
 
 function AgentCard({ 
   icon: Icon, 
@@ -99,17 +91,14 @@ export default function EvidenceAssessmentPage() {
     setReportData,
     reportFilename,
     setReportFilename,
+    showAgents,
+    setShowAgents,
+    agentStates,
+    setAgentStates,
     clearEvidence,
   } = useEvidenceContext();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
-  
-  const [agentStates, setAgentStates] = useState<AgentState>({
-    validator: "idle",
-    assessor: "idle",
-    reporter: "idle",
-  });
-  const [showAgents, setShowAgents] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -130,15 +119,6 @@ export default function EvidenceAssessmentPage() {
 
   const handleDropzoneClick = () => {
     fileInputRef.current?.click();
-  };
-
-  const resetAgents = () => {
-    setShowAgents(false);
-    setAgentStates({
-      validator: "idle",
-      assessor: "idle",
-      reporter: "idle",
-    });
   };
 
   const handleAssess = async () => {
@@ -311,7 +291,6 @@ export default function EvidenceAssessmentPage() {
 
   const handleNewAssessment = () => {
     clearEvidence();
-    resetAgents();
   };
 
   return (

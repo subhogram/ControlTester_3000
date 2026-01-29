@@ -1,5 +1,13 @@
 import { createContext, useState, useContext, ReactNode } from "react";
 
+export type AgentStatus = "idle" | "active" | "completed" | "error";
+
+export interface AgentState {
+  validator: AgentStatus;
+  assessor: AgentStatus;
+  reporter: AgentStatus;
+}
+
 export interface EvidenceContextType {
   files: File[];
   setFiles: (files: File[] | ((prev: File[]) => File[])) => void;
@@ -11,10 +19,20 @@ export interface EvidenceContextType {
   setReportData: (data: Blob | null) => void;
   reportFilename: string;
   setReportFilename: (filename: string) => void;
+  showAgents: boolean;
+  setShowAgents: (value: boolean) => void;
+  agentStates: AgentState;
+  setAgentStates: (states: AgentState | ((prev: AgentState) => AgentState)) => void;
   clearEvidence: () => void;
 }
 
 export const EvidenceContext = createContext<EvidenceContextType | undefined>(undefined);
+
+const initialAgentStates: AgentState = {
+  validator: "idle",
+  assessor: "idle",
+  reporter: "idle",
+};
 
 export function EvidenceProvider({ children }: { children: ReactNode }) {
   const [files, setFiles] = useState<File[]>([]);
@@ -22,6 +40,8 @@ export function EvidenceProvider({ children }: { children: ReactNode }) {
   const [assessmentStatus, setAssessmentStatus] = useState<string>("");
   const [reportData, setReportData] = useState<Blob | null>(null);
   const [reportFilename, setReportFilename] = useState<string>("assessment-report.pdf");
+  const [showAgents, setShowAgents] = useState(false);
+  const [agentStates, setAgentStates] = useState<AgentState>(initialAgentStates);
 
   const clearEvidence = () => {
     setFiles([]);
@@ -29,6 +49,8 @@ export function EvidenceProvider({ children }: { children: ReactNode }) {
     setAssessmentStatus("");
     setReportData(null);
     setReportFilename("assessment-report.pdf");
+    setShowAgents(false);
+    setAgentStates(initialAgentStates);
   };
 
   return (
@@ -44,6 +66,10 @@ export function EvidenceProvider({ children }: { children: ReactNode }) {
         setReportData,
         reportFilename,
         setReportFilename,
+        showAgents,
+        setShowAgents,
+        agentStates,
+        setAgentStates,
         clearEvidence,
       }}
     >
