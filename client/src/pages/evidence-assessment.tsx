@@ -382,7 +382,7 @@ export default function EvidenceAssessmentPage() {
                 Analyzing through AI agents
               </h2>
               <p className="text-muted-foreground mt-2">
-                Processing {files.length} evidence file{files.length !== 1 ? "s" : ""} through AI agents
+                Processing {files.length} file{files.length !== 1 ? "s" : ""} through AI agents
               </p>
             </div>
 
