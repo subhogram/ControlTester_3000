@@ -1,5 +1,5 @@
 import { useLocation } from "wouter";
-import { Moon, Sun, User, LogOut, MessageSquare, FileSearch, Settings } from "lucide-react";
+import { Moon, Sun, User, LogOut, MessageSquare, FileSearch, Settings, TestTube } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,6 +18,7 @@ interface AppLayoutProps {
 const tabs = [
   { title: "Chat", path: "/", icon: MessageSquare },
   { title: "AI-Risk Assessment", path: "/evidence-assessment", icon: FileSearch },
+  { title: "AI Control Testing", path: "/control-testing", icon: TestTube },
   { title: "Settings", path: "/settings", icon: Settings },
 ];
 

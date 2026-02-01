@@ -6,10 +6,12 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ChatProvider } from "@/contexts/ChatContext";
 import { EvidenceProvider } from "@/contexts/EvidenceContext";
+import { ControlTestingProvider } from "@/contexts/ControlTestingContext";
 import AppLayout from "@/components/AppLayout";
 import ChatPage from "@/pages/chat";
 import SettingsPage from "@/pages/settings";
 import EvidenceAssessmentPage from "@/pages/evidence-assessment";
+import ControlTestingPage from "@/pages/control-testing";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -19,6 +21,7 @@ function Router() {
         <Route path="/" component={ChatPage} />
         <Route path="/settings" component={SettingsPage} />
         <Route path="/evidence-assessment" component={EvidenceAssessmentPage} />
+        <Route path="/control-testing" component={ControlTestingPage} />
         <Route component={NotFound} />
       </Switch>
     </AppLayout>
@@ -32,8 +35,10 @@ function App() {
         <TooltipProvider>
           <ChatProvider>
             <EvidenceProvider>
-              <Toaster />
-              <Router />
+              <ControlTestingProvider>
+                <Toaster />
+                <Router />
+              </ControlTestingProvider>
             </EvidenceProvider>
           </ChatProvider>
         </TooltipProvider>
