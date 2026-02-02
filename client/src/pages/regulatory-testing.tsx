@@ -385,7 +385,6 @@ export default function RegulatoryTestingPage() {
             <div className="flex items-center justify-center gap-4">
               <Button
                 onClick={handleExportResults}
-                className="bg-green-600 hover:bg-green-700"
                 data-testid="button-export-results"
               >
                 <Download className="h-4 w-4 mr-2" />
