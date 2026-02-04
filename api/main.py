@@ -733,23 +733,7 @@ async def assess_evidence(
     embeddings_for_load = OllamaEmbeddings(model=embed_name, base_url=base_url)
 
     try:  
-        for uf in evidence_files:
-            # start = time.time()
-            # ext = Path(uf.filename).suffix or ".tmp"
-            # print("Processing evidence file:", uf.filename)
-            # tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
-            # content = await uf.read()
-            # tmp.write(content)
-            # tmp.close()
-            # tmp_paths.append(tmp.name)
-            # fh = open(tmp.name, "rb")
-
-            # evidence_objs.append(
-            #     FileObj(
-            #         file=fh,
-            #         filename=uf.filename  # ✅ PRESERVED
-            #     )
-            # )
+        for uf in evidence_files:           
 
             start = time.time()
             ext = Path(uf.filename).suffix or ".tmp"
@@ -907,6 +891,11 @@ async def load_vectorstore_api(
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(fe))
     except Exception as e:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e))
+
+#-----------------------------------------------------------------------------
+# Regulatoy Compliance Endpoint Placeholder
+#-----------------------------------------------------------------------------
+
 
 # ----------------------------------------------------------------------------
 # Run with:  uvicorn api.main:app --reload
