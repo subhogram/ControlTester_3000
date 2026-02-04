@@ -1,132 +1,109 @@
-from fastapi import FastAPI, UploadFile, File, Form
-from typing import List
-from pathlib import Path
-import tempfile
+import os
 import json
 import numpy as np
+from pathlib import Path
+from typing import List, Dict
 
-from langchain_community.document_loaders import PyPDFLoader, TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.llms import Ollama
 from langchain_community.embeddings import OllamaEmbeddings
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from sklearn.metrics.pairwise import cosine_similarity
 
-app = FastAPI()
 
-
-# =========================================================
+# ------------------------------------------------------------------
 # CONFIG
-# =========================================================
-OLLAMA_URL = "http://localhost:11434"
-
+# ------------------------------------------------------------------
+SIM_THRESHOLD = 0.78
 CHUNK_SIZE = 1400
 CHUNK_OVERLAP = 200
-SIM_THRESHOLD = 0.78
+OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 
-# =========================================================
-# BASE AGENT
-# =========================================================
-class BaseAgent:
+# ------------------------------------------------------------------
+# AGENTS
+# ------------------------------------------------------------------
+class InterpreterAgent:
     def __init__(self, model: str):
-        self.llm = Ollama(
-            model=model,
-            base_url=OLLAMA_URL,
-            temperature=0.0,
-        )
+        self.llm = Ollama(model=model, base_url=OLLAMA_URL)
 
-
-# =========================================================
-# 🧩 1. INTERPRETER AGENT
-# =========================================================
-class InterpreterAgent(BaseAgent):
-    def interpret(self, document_names):
+    def run(self, document_names: List[str]) -> Dict:
         prompt = f"""
-You are a cybersecurity regulatory analyst.
+        You are a cybersecurity regulatory analyst.
 
-Based on the following regulations, infer:
-- Regulatory intent
-- Control strictness level
-- Target industry
-- Dominant control domains
+        Infer:
+        - Regulatory intent
+        - Target industry
+        - Control domains
+        - Expected strictness
 
-Return JSON.
-Documents:
-{document_names}
-"""
-        return json.loads(self.llm.invoke(prompt))
+        Documents:
+        {document_names}
+
+        Return JSON only.
+        """
+        raw = self.llm.invoke(prompt)
+        parsed = safe_json_loads(raw)
+
+        if not parsed:
+            parsed = {
+                "regulatory_intent": "Unable to confidently infer intent",
+                "target_industry": "Unknown",
+                "control_domains": [],
+                "expected_strictness": "Unknown",
+                "raw_llm_output": raw
+            }
+
+        return parsed
 
 
-# =========================================================
-# 🔍 2. EXTRACTOR AGENT
-# =========================================================
-class ExtractorAgent(BaseAgent):
-    def extract_controls(self, chunks):
+
+class ExtractorAgent:
+    def __init__(self, model: str):
+        self.llm = Ollama(model=model, base_url=OLLAMA_URL)
+
+    def run(self, chunks):
         controls = []
 
         for c in chunks:
             prompt = f"""
-Extract cybersecurity RISK CONTROL REQUIREMENTS only.
+                Extract ONLY cybersecurity RISK CONTROL REQUIREMENTS.
 
-Return JSON list with:
-- control_statement
-- control_domain
-- risk_addressed
-- enforcement_level (Low/Medium/High)
-- mandatory_keywords
+                Return JSON list with:
+                - control_statement
+                - control_domain
+                - risk_addressed
+                - enforcement_level
+                - mandatory_keywords
 
-TEXT:
-\"\"\"{c.page_content}\"\"\"
-"""
+                TEXT:
+                \"\"\"{c.page_content}\"\"\"
+                """
             try:
-                result = json.loads(self.llm.invoke(prompt))
-                for r in result:
-                    r["source"] = c.metadata["source"]
-                    controls.append(r)
+                raw = self.llm.invoke(prompt)
+                parsed = safe_json_loads(raw, default=[])
+
+                if not isinstance(parsed, list):
+                    parsed = []
+
+                for p in parsed:
+                    p["source"] = c.metadata["source"]
+                    controls.append(p)
+
             except Exception:
                 continue
 
         return controls
 
 
-# =========================================================
-# ⚖️ 3. COMPARATOR AGENT
-# =========================================================
 class ComparatorAgent:
-    def __init__(self, embed_model: str):
+    def __init__(self, embed_model="nomic-embed-text"):
         self.embedder = OllamaEmbeddings(
             model=embed_model,
-            base_url=OLLAMA_URL,
+            base_url=OLLAMA_URL
         )
 
-    def embed(self, controls):
-        return np.array(
-            self.embedder.embed_documents(
-                [c["control_statement"] for c in controls]
-            )
-        )
-
-    def group_controls(self, controls, embeddings):
-        sim = cosine_similarity(embeddings)
-        visited, groups = set(), []
-
-        for i in range(len(controls)):
-            if i in visited:
-                continue
-
-            group = [i]
-            visited.add(i)
-
-            for j in range(len(controls)):
-                if j not in visited and sim[i][j] >= SIM_THRESHOLD:
-                    group.append(j)
-                    visited.add(j)
-
-            groups.append([controls[x] for x in group])
-
-        return groups
-
-    def stringency_score(self, c):
+    def _stringency(self, c):
         score = 0
         kw = c.get("mandatory_keywords", "").lower()
 
@@ -142,12 +119,38 @@ class ComparatorAgent:
         score *= min(len(c["control_statement"]) / 200, 1.5)
         return round(score, 2)
 
-    def analyze(self, groups):
+    def run(self, controls):
+        if not controls or len(controls) < 2:
+            return []
+
+        embeddings = np.array(
+            self.embedder.embed_documents(
+                [c["control_statement"] for c in controls]
+            )
+        )
+
+        if embeddings.ndim != 2 or embeddings.shape[0] < 2:
+            return []
+
+        sim = cosine_similarity(embeddings)
+        visited, groups = set(), []
+
+        for i in range(len(controls)):
+            if i in visited:
+                continue
+            grp = [i]
+            visited.add(i)
+            for j in range(len(controls)):
+                if j not in visited and sim[i][j] >= SIM_THRESHOLD:
+                    grp.append(j)
+                    visited.add(j)
+            groups.append([controls[x] for x in grp])
+
         analysis = []
 
         for g in groups:
             for c in g:
-                c["stringency_score"] = self.stringency_score(c)
+                c["stringency_score"] = self._stringency(c)
 
             strongest = max(g, key=lambda x: x["stringency_score"])
 
@@ -160,10 +163,8 @@ class ComparatorAgent:
                         "source": c["source"],
                         "stringency_score": c["stringency_score"],
                         "compliance_%": round(
-                            min(
-                                c["stringency_score"] /
-                                strongest["stringency_score"], 1
-                            ) * 100, 2
+                            min(c["stringency_score"] /
+                                strongest["stringency_score"], 1) * 100, 2
                         )
                     }
                     for c in g
@@ -173,52 +174,43 @@ class ComparatorAgent:
         return analysis
 
 
-# =========================================================
-# 📝 4. REPORTER AGENT
-# =========================================================
-class ReporterAgent(BaseAgent):
-    def generate(self, interpretation, analysis):
+class ReporterAgent:
+    def __init__(self, model: str):
+        self.llm = Ollama(model=model, base_url=OLLAMA_URL)
+
+    def run(self, interpretation, analysis):
         prompt = f"""
-You are a CISO producing a regulatory comparison report.
+You are a CISO.
+
+Create a regulatory comparison report covering:
+- Common controls
+- Differences
+- Most stringent regulation
+- Compliance percentages
+- Risk implications
+- Recommendations
 
 Interpretation:
 {json.dumps(interpretation, indent=2)}
 
 Analysis:
 {json.dumps(analysis, indent=2)}
-
-Provide:
-- Common controls
-- Differences
-- Most stringent regulations
-- Compliance percentages
-- Risk impact
-- Recommendations
 """
         return self.llm.invoke(prompt)
 
 
-# =========================================================
-# UTILS
-# =========================================================
-def save_uploads(files: List[UploadFile]) -> List[str]:
-    paths = []
-
-    for f in files:
-        suffix = Path(f.filename).suffix or ".tmp"
-        with tempfile.NamedTemporaryFile(
-            delete=False, suffix=suffix
-        ) as tmp:
-            tmp.write(f.file.read())
-            paths.append(tmp.name)
-
-    return paths
-
-
-def load_and_chunk(paths, filenames):
+# ------------------------------------------------------------------
+# PIPELINE ENTRYPOINT (THIS IS WHAT API CALLS)
+# ------------------------------------------------------------------
+def compare_regulatory_documents(
+    file_paths: List[str],
+    filenames: List[str],
+    selected_model: str
+) -> Dict:
+    # Load documents
     docs = []
-    for p, name in zip(paths, filenames):
-        loader = PyPDFLoader(p) if p.endswith(".pdf") else TextLoader(p)
+    for path, name in zip(file_paths, filenames):
+        loader = PyPDFLoader(path) if path.endswith(".pdf") else TextLoader(path)
         loaded = loader.load()
         for d in loaded:
             d.metadata["source"] = name
@@ -226,44 +218,83 @@ def load_and_chunk(paths, filenames):
 
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
+        chunk_overlap=CHUNK_OVERLAP
     )
-    return splitter.split_documents(docs)
-
-
-
-@app.post("/compare-regulations")
-async def compare_regulations(
-    selected_model: str = Form(...),
-    max_workers: int = Form(4),  # reserved for future parallelism
-    regulation_files: List[UploadFile] = File(...)
-):
-    # Save files
-    filenames = [f.filename for f in regulation_files]
-    paths = save_uploads(regulation_files)
-
-    # Chunk documents
-    chunks = load_and_chunk(paths, filenames)
+    chunks = splitter.split_documents(docs)
 
     # Agents
     interpreter = InterpreterAgent(selected_model)
     extractor = ExtractorAgent(selected_model)
-    comparator = ComparatorAgent(embed_model="nomic-embed-text")
+    comparator = ComparatorAgent()
     reporter = ReporterAgent(selected_model)
 
-    # Pipeline
-    interpretation = interpreter.interpret(filenames)
-    controls = extractor.extract_controls(chunks)
-    embeddings = comparator.embed(controls)
-    groups = comparator.group_controls(controls, embeddings)
-    analysis = comparator.analyze(groups)
-    report = reporter.generate(interpretation, analysis)
+    interpretation = interpreter.run(filenames)
+    controls = extractor.run(chunks)
+    analysis = comparator.run(controls)
+
+    if not analysis:
+        return {
+            "documents": filenames,
+            "extracted_controls": 0,
+            "control_groups": 0,
+            "interpretation": interpretation,
+            "analysis": [],
+            "final_report": (
+                "No comparable cybersecurity risk controls could be reliably "
+                "extracted from the provided documents. This may indicate that "
+                "the documents are descriptive in nature, lack explicit control "
+                "statements, or require manual interpretation."
+            )
+        }
+
+    report = reporter.run(interpretation, analysis)
+
+    if not controls:
+        interpretation["warning"] = (
+            "No explicit risk control statements were extracted. "
+            "Downstream comparison may be limited."
+        )
+
+
 
     return {
-        "model_used": selected_model,
         "documents": filenames,
         "extracted_controls": len(controls),
-        "control_groups": len(groups),
+        "control_groups": len(analysis),
+        "interpretation": interpretation,
         "analysis": analysis,
         "final_report": report
     }
+
+import re
+
+def safe_json_loads(llm_output: str, default=None):
+    """
+    Safely extract JSON from LLM output.
+    Handles:
+    - Empty output
+    - Markdown fenced JSON
+    - Extra commentary
+    """
+    if not llm_output or not llm_output.strip():
+        return default
+
+    # Remove markdown fences
+    llm_output = llm_output.strip()
+    llm_output = re.sub(r"```json|```", "", llm_output, flags=re.IGNORECASE).strip()
+
+    # Try direct parse
+    try:
+        return json.loads(llm_output)
+    except json.JSONDecodeError:
+        pass
+
+    # Try extracting first JSON object
+    match = re.search(r"\{.*\}", llm_output, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(0))
+        except json.JSONDecodeError:
+            pass
+
+    return default

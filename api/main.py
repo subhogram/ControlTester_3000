@@ -31,6 +31,8 @@ from utils.pdf_generator import generate_workbook
 from datetime import datetime
 import uuid
 
+from utils.regulatory_comparision import compare_regulatory_documents
+
 # ----------------------------------------------------------------------------
 # Logging
 # ----------------------------------------------------------------------------
@@ -293,6 +295,7 @@ async def root():
             "summary": "/generate-summary",
             "models": "/models",
             "chat": "/chat",
+            "compare-regulations": "/compare-regulations",
             "analyze": "/analyze-query",
             "session_create": "/session/create",
             "session_info": "/session/{session_id}",
@@ -895,7 +898,56 @@ async def load_vectorstore_api(
 #-----------------------------------------------------------------------------
 # Regulatoy Compliance Endpoint Placeholder
 #-----------------------------------------------------------------------------
+@app.post(
+    "/compare-regulations",
+    tags=["analysis"],
+    summary="Compare cybersecurity regulations and assess control stringency"
+)
+async def compare_regulations(
+    selected_model: str = Form(...),
+    max_workers: int = Form(4),  # reserved
+    regulation_files: List[UploadFile] = File(...)
+):
+    rid = _req_id()
+    logger.info(f"[{rid}] Regulation comparison request")
 
+    if len(regulation_files) < 2:
+        raise HTTPException(400, "At least two regulation files are required")
+
+    tmp_paths, filenames = [], []
+
+    try:
+        for uf in regulation_files:
+            ext = Path(uf.filename).suffix or ".tmp"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            tmp.write(await uf.read())
+            tmp.close()
+            tmp_paths.append(tmp.name)
+            filenames.append(uf.filename)
+
+        result = compare_regulatory_documents(
+            file_paths=tmp_paths,
+            filenames=filenames,
+            selected_model=selected_model
+        )
+
+        return {
+            "success": True,
+            "model_used": selected_model,
+            **result
+        }
+
+    except Exception as e:
+        logger.error(f"[{rid}] Regulatory comparison failed")
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, str(e))
+
+    finally:
+        for p in tmp_paths:
+            try:
+                os.unlink(p)
+            except Exception:
+                pass
 
 # ----------------------------------------------------------------------------
 # Run with:  uvicorn api.main:app --reload
