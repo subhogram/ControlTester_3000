@@ -80,39 +80,81 @@ services:
     networks:
       - appnet
     
-  ui_agent:
+  # kpmg_ui:
+  #   build:
+  #     context: ./kpmg_ui
+  #     dockerfile: Dockerfile
+  #   container_name: kpmg_ui
+  #   restart: unless-stopped
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - REACT_APP_API_URL=http://fastapi_api:8000
+  #     - OLLAMA_BASE_URL=http://ollama:11434
+  #     - NODE_ENV=production
+  #   depends_on:
+  #     fastapi_api:
+  #       condition: service_started
+  #   networks:
+  #     - appnet
+  #   volumes:
+  #     - ./kpmg_ui:/app:delegated
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"]
+  #     interval: 30s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 10s
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         memory: 512m
+  #         cpus: '0.5'
+  #       reservations:
+  #         memory: 128m
+  #         cpus: '0.25'
+
+  web_ui_agent:
     build:
-      context: ./UI_Agent
+      context: ./kpmg_ui
       dockerfile: Dockerfile
-    container_name: ui_agent
+    container_name: agent_assess_web
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "5000:5000"
     environment:
-      - REACT_APP_API_URL=http://fastapi_api:8000
-      - OLLAMA_BASE_URL=http://ollama:11434
       - NODE_ENV=production
+      - VITE_API_URL=${VITE_API_URL:-http://fastapi_api:8000}
+      - OLLAMA_BASE_URL=http://ollama:11434
     depends_on:
       fastapi_api:
         condition: service_started
+      # streamlit_app:
+      #   condition: service_started
+      # ollama:
+      #   condition: service_healthy
     networks:
       - appnet
-    volumes:
-      - ./UI_Agent:/app:delegated
+    # volumes:
+    #   # Development mode: mount source code for hot reload
+    #   # Comment out for production builds
+    #   - .:/app:delegated
+    #   - /app/node_modules
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:3000/ || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:5000/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 30s
     deploy:
       resources:
         limits:
-          memory: 512m
-          cpus: '0.5'
+          memory: 1G
+          cpus: '1.0'
         reservations:
-          memory: 128m
-          cpus: '0.25'
+          memory: 256m
+          cpus: '0.5'
+
 
 volumes:
   ollama_data:
