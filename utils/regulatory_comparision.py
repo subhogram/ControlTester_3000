@@ -1,8 +1,11 @@
 import os
 import json
+import re
 import numpy as np
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Tuple, Optional
+from collections import defaultdict
+from datetime import datetime
 
 from langchain_community.llms import Ollama
 from langchain_community.embeddings import OllamaEmbeddings
@@ -14,272 +17,40 @@ from sklearn.metrics.pairwise import cosine_similarity
 # ------------------------------------------------------------------
 # CONFIG
 # ------------------------------------------------------------------
-SIM_THRESHOLD = 0.78
-CHUNK_SIZE = 1400
-CHUNK_OVERLAP = 200
+SIM_THRESHOLD = 0.75  # Lowered slightly for better grouping
+CHUNK_SIZE = 2000     # Increased for better context
+CHUNK_OVERLAP = 400   # Increased overlap
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-
-# ------------------------------------------------------------------
-# AGENTS
-# ------------------------------------------------------------------
-class InterpreterAgent:
-    def __init__(self, model: str):
-        self.llm = Ollama(model=model, base_url=OLLAMA_URL)
-
-    def run(self, document_names: List[str]) -> Dict:
-        prompt = f"""
-        You are a cybersecurity regulatory analyst.
-
-        Infer:
-        - Regulatory intent
-        - Target industry
-        - Control domains
-        - Expected strictness
-
-        Documents:
-        {document_names}
-
-        Return JSON only.
-        """
-        raw = self.llm.invoke(prompt)
-        parsed = safe_json_loads(raw)
-
-        if not parsed:
-            parsed = {
-                "regulatory_intent": "Unable to confidently infer intent",
-                "target_industry": "Unknown",
-                "control_domains": [],
-                "expected_strictness": "Unknown",
-                "raw_llm_output": raw
-            }
-
-        return parsed
-
-
-
-class ExtractorAgent:
-    def __init__(self, model: str):
-        self.llm = Ollama(model=model, base_url=OLLAMA_URL)
-
-    def run(self, chunks):
-        controls = []
-
-        for c in chunks:
-            prompt = f"""
-                Extract ONLY cybersecurity RISK CONTROL REQUIREMENTS.
-
-                Return JSON list with:
-                - control_statement
-                - control_domain
-                - risk_addressed
-                - enforcement_level
-                - mandatory_keywords
-
-                TEXT:
-                \"\"\"{c.page_content}\"\"\"
-                """
-            try:
-                raw = self.llm.invoke(prompt)
-                parsed = safe_json_loads(raw, default=[])
-
-                if not isinstance(parsed, list):
-                    parsed = []
-
-                for p in parsed:
-                    p["source"] = c.metadata["source"]
-                    controls.append(p)
-
-            except Exception:
-                continue
-
-        return controls
-
-
-class ComparatorAgent:
-    def __init__(self, embed_model="nomic-embed-text"):
-        self.embedder = OllamaEmbeddings(
-            model=embed_model,
-            base_url=OLLAMA_URL
-        )
-
-    def _stringency(self, c):
-        score = 0
-        kw = c.get("mandatory_keywords", "").lower()
-
-        if "shall" in kw or "must" in kw:
-            score += 3
-        elif "should" in kw:
-            score += 1
-
-        score += {"high": 3, "medium": 2}.get(
-            c.get("enforcement_level", "").lower(), 1
-        )
-
-        score *= min(len(c["control_statement"]) / 200, 1.5)
-        return round(score, 2)
-
-    def run(self, controls):
-        if not controls or len(controls) < 2:
-            return []
-
-        embeddings = np.array(
-            self.embedder.embed_documents(
-                [c["control_statement"] for c in controls]
-            )
-        )
-
-        if embeddings.ndim != 2 or embeddings.shape[0] < 2:
-            return []
-
-        sim = cosine_similarity(embeddings)
-        visited, groups = set(), []
-
-        for i in range(len(controls)):
-            if i in visited:
-                continue
-            grp = [i]
-            visited.add(i)
-            for j in range(len(controls)):
-                if j not in visited and sim[i][j] >= SIM_THRESHOLD:
-                    grp.append(j)
-                    visited.add(j)
-            groups.append([controls[x] for x in grp])
-
-        analysis = []
-
-        for g in groups:
-            for c in g:
-                c["stringency_score"] = self._stringency(c)
-
-            strongest = max(g, key=lambda x: x["stringency_score"])
-
-            analysis.append({
-                "control_domain": strongest["control_domain"],
-                "risk": strongest["risk_addressed"],
-                "baseline_control": strongest,
-                "comparisons": [
-                    {
-                        "source": c["source"],
-                        "stringency_score": c["stringency_score"],
-                        "compliance_%": round(
-                            min(c["stringency_score"] /
-                                strongest["stringency_score"], 1) * 100, 2
-                        )
-                    }
-                    for c in g
-                ]
-            })
-
-        return analysis
-
-
-class ReporterAgent:
-    def __init__(self, model: str):
-        self.llm = Ollama(model=model, base_url=OLLAMA_URL)
-
-    def run(self, interpretation, analysis):
-        prompt = f"""
-You are a CISO.
-
-Create a regulatory comparison report covering:
-- Common controls
-- Differences
-- Most stringent regulation
-- Compliance percentages
-- Risk implications
-- Recommendations
-
-Interpretation:
-{json.dumps(interpretation, indent=2)}
-
-Analysis:
-{json.dumps(analysis, indent=2)}
-"""
-        return self.llm.invoke(prompt)
+# Control domain taxonomy - expanded to match analysis
+CONTROL_DOMAINS = {
+    "governance": ["governance", "board", "committee", "oversight", "management", "ciso", "cio"],
+    "third_party": ["third party", "vendor", "outsourcing", "service provider", "supply chain"],
+    "change_management": ["change", "patch", "update", "deployment", "release"],
+    "technology_refresh": ["end of support", "eos", "obsolete", "outdated", "lifecycle"],
+    "access_control": ["access", "authentication", "authorization", "privilege", "mfa", "multi-factor"],
+    "va_pt": ["vulnerability", "penetration", "testing", "assessment", "va", "pt"],
+    "cryptography": ["cryptography", "encryption", "key management", "cipher", "crypto"],
+    "data_security": ["data loss", "dlp", "data protection", "confidentiality", "data at rest"],
+    "network_security": ["network", "firewall", "segmentation", "intrusion", "dmz"],
+    "business_continuity": ["business continuity", "disaster recovery", "bcp", "dr", "rto", "rpo"],
+    "incident_response": ["incident", "breach", "response", "forensic", "cyber incident"],
+    "system_security": ["endpoint", "malware", "antivirus", "system hardening", "iot"],
+    "cyber_operations": ["soc", "security operations", "threat intelligence", "monitoring"],
+    "audit": ["audit", "assurance", "review", "compliance check"],
+    "online_services": ["online banking", "digital", "mobile app", "api", "transaction"],
+    "emerging_tech": ["api", "iot", "devops", "agile", "cloud", "virtualization"]
+}
 
 
 # ------------------------------------------------------------------
-# PIPELINE ENTRYPOINT (THIS IS WHAT API CALLS)
+# UTILITY FUNCTIONS
 # ------------------------------------------------------------------
-def compare_regulatory_documents(
-    file_paths: List[str],
-    filenames: List[str],
-    selected_model: str
-) -> Dict:
-    # Load documents
-    docs = []
-    for path, name in zip(file_paths, filenames):
-        loader = PyPDFLoader(path) if path.endswith(".pdf") else TextLoader(path)
-        loaded = loader.load()
-        for d in loaded:
-            d.metadata["source"] = name
-        docs.extend(loaded)
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP
-    )
-    chunks = splitter.split_documents(docs)
-
-    # Agents
-    interpreter = InterpreterAgent(selected_model)
-    extractor = ExtractorAgent(selected_model)
-    comparator = ComparatorAgent()
-    reporter = ReporterAgent(selected_model)
-
-    interpretation = interpreter.run(filenames)
-    controls = extractor.run(chunks)
-    analysis = comparator.run(controls)
-
-    if not analysis:
-        return {
-            "documents": filenames,
-            "extracted_controls": 0,
-            "control_groups": 0,
-            "interpretation": interpretation,
-            "analysis": [],
-            "final_report": (
-                "No comparable cybersecurity risk controls could be reliably "
-                "extracted from the provided documents. This may indicate that "
-                "the documents are descriptive in nature, lack explicit control "
-                "statements, or require manual interpretation."
-            )
-        }
-
-    report = reporter.run(interpretation, analysis)
-
-    if not controls:
-        interpretation["warning"] = (
-            "No explicit risk control statements were extracted. "
-            "Downstream comparison may be limited."
-        )
-
-
-
-    return {
-        "documents": filenames,
-        "extracted_controls": len(controls),
-        "control_groups": len(analysis),
-        "interpretation": interpretation,
-        "analysis": analysis,
-        "final_report": report
-    }
-
-import re
-
 def safe_json_loads(llm_output: str, default=None):
-    """
-    Safely extract JSON from LLM output.
-    Handles:
-    - Empty output
-    - Markdown fenced JSON
-    - Extra commentary
-    """
+    """Safely extract JSON from LLM output."""
     if not llm_output or not llm_output.strip():
         return default
 
-    # Remove markdown fences
     llm_output = llm_output.strip()
     llm_output = re.sub(r"```json|```", "", llm_output, flags=re.IGNORECASE).strip()
 
@@ -289,8 +60,8 @@ def safe_json_loads(llm_output: str, default=None):
     except json.JSONDecodeError:
         pass
 
-    # Try extracting first JSON object
-    match = re.search(r"\{.*\}", llm_output, re.DOTALL)
+    # Try extracting first JSON object/array
+    match = re.search(r"[\[{].*[\]}]", llm_output, re.DOTALL)
     if match:
         try:
             return json.loads(match.group(0))
@@ -298,3 +69,610 @@ def safe_json_loads(llm_output: str, default=None):
             pass
 
     return default
+
+
+def classify_domain(text: str) -> str:
+    """Classify control into domain based on keywords."""
+    text_lower = text.lower()
+    scores = defaultdict(int)
+    
+    for domain, keywords in CONTROL_DOMAINS.items():
+        for keyword in keywords:
+            if keyword in text_lower:
+                scores[domain] += 1
+    
+    if not scores:
+        return "general"
+    
+    return max(scores.items(), key=lambda x: x[1])[0]
+
+
+# ------------------------------------------------------------------
+# ENHANCED AGENTS
+# ------------------------------------------------------------------
+class DocumentAnalyzerAgent:
+    """Analyzes document structure and regulatory framework."""
+    
+    def __init__(self, model: str):
+        self.llm = Ollama(model=model, base_url=OLLAMA_URL, temperature=0.1)
+
+    def run(self, chunks: List, filenames: List[str]) -> Dict:
+        # Sample chunks from each document
+        doc_samples = defaultdict(list)
+        for chunk in chunks[:50]:  # First 50 chunks for overview
+            doc_samples[chunk.metadata["source"]].append(chunk.page_content[:500])
+        
+        analyses = {}
+        for filename, samples in doc_samples.items():
+            combined_text = "\n\n".join(samples[:5])
+            
+            prompt = f"""Analyze this regulatory document excerpt and return ONLY a JSON object with these exact fields:
+
+{{
+  "framework_name": "Official name of the framework",
+  "issuing_authority": "Authority that issued it",
+  "target_industry": "Primary industry (e.g., financial services, banking)",
+  "regulatory_approach": "rules-based or principles-based",
+  "key_focus_areas": ["area1", "area2", "area3"],
+  "governance_model": "governance structure required",
+  "enforcement_style": "prescriptive or flexible",
+  "date_issued": "date if mentioned"
+}}
+
+Document: {filename}
+
+Excerpt:
+{combined_text}
+
+Return ONLY the JSON object, no other text."""
+
+            raw = self.llm.invoke(prompt)
+            parsed = safe_json_loads(raw, default={
+                "framework_name": filename,
+                "issuing_authority": "Unknown",
+                "target_industry": "Financial Services",
+                "regulatory_approach": "Unknown",
+                "key_focus_areas": [],
+                "governance_model": "Not specified",
+                "enforcement_style": "Unknown",
+                "date_issued": "Unknown"
+            })
+            analyses[filename] = parsed
+        
+        return analyses
+
+
+class ControlExtractorAgent:
+    """Extracts risk controls with enhanced metadata."""
+    
+    def __init__(self, model: str):
+        self.llm = Ollama(model=model, base_url=OLLAMA_URL, temperature=0.1)
+        self.batch_size = 3  # Process multiple chunks together for context
+
+    def run(self, chunks: List) -> List[Dict]:
+        controls = []
+        
+        # Process in batches for better context
+        for i in range(0, len(chunks), self.batch_size):
+            batch = chunks[i:i + self.batch_size]
+            batch_text = "\n\n---CHUNK---\n\n".join([c.page_content for c in batch])
+            
+            prompt = f"""Extract ALL cybersecurity and IT risk control requirements from this text.
+
+For EACH control, return a JSON object with:
+- control_id: sequential number
+- control_statement: exact requirement (keep original wording)
+- control_domain: one of [governance, access_control, cryptography, network_security, data_security, business_continuity, incident_response, third_party, change_management, audit, online_services, emerging_tech, va_pt, system_security, cyber_operations, technology_refresh]
+- risk_addressed: what risk this mitigates
+- enforcement_level: "mandatory", "recommended", or "optional"
+- mandatory_keywords: list of words like ["shall", "must", "should", "may"]
+- specificity_level: "specific" (has numbers/frequencies/metrics) or "general"
+- implementation_guidance: "detailed" or "principle-based"
+- frequency_specified: "yes" or "no"
+- metric_specified: "yes" or "no"
+
+Return a JSON array of controls. If no controls found, return [].
+
+TEXT:
+{batch_text}
+
+Return ONLY the JSON array."""
+
+            try:
+                raw = self.llm.invoke(prompt)
+                parsed = safe_json_loads(raw, default=[])
+                
+                if not isinstance(parsed, list):
+                    parsed = []
+                
+                # Add metadata
+                for control in parsed:
+                    control["source"] = batch[0].metadata["source"]
+                    control["chunk_index"] = i
+                    
+                    # Auto-classify domain if not properly set
+                    if control.get("control_domain") == "general" or not control.get("control_domain"):
+                        control["control_domain"] = classify_domain(control.get("control_statement", ""))
+                    
+                    controls.append(control)
+                    
+            except Exception as e:
+                print(f"Error processing batch {i}: {e}")
+                continue
+        
+        return controls
+
+
+class StringencyAnalyzerAgent:
+    """Enhanced stringency analysis with multiple dimensions."""
+    
+    def __init__(self, embed_model="nomic-embed-text"):
+        self.embedder = OllamaEmbeddings(
+            model=embed_model,
+            base_url=OLLAMA_URL
+        )
+
+    def calculate_stringency(self, control: Dict) -> Dict[str, float]:
+        """Calculate multi-dimensional stringency score."""
+        scores = {
+            "prescriptiveness": 0.0,
+            "measurability": 0.0,
+            "enforcement": 0.0,
+            "scope": 0.0,
+            "independence": 0.0
+        }
+        
+        statement = control.get("control_statement", "").lower()
+        keywords = control.get("mandatory_keywords", [])
+        
+        # 1. Prescriptiveness (0-100)
+        if "shall" in keywords or "must" in keywords:
+            scores["prescriptiveness"] = 90
+        elif "should" in keywords:
+            scores["prescriptiveness"] = 60
+        elif "may" in keywords or "recommended" in statement:
+            scores["prescriptiveness"] = 30
+        else:
+            scores["prescriptiveness"] = 50
+        
+        # Boost for specific requirements
+        if control.get("specificity_level") == "specific":
+            scores["prescriptiveness"] += 10
+        
+        # 2. Measurability (0-100)
+        if control.get("frequency_specified") == "yes":
+            scores["measurability"] += 40
+        if control.get("metric_specified") == "yes":
+            scores["measurability"] += 40
+        
+        # Look for specific numbers
+        if re.search(r'\d+\s*(months?|years?|days?|hours?|%|percent)', statement):
+            scores["measurability"] += 20
+        
+        # 3. Enforcement (0-100)
+        enforcement_map = {
+            "mandatory": 100,
+            "recommended": 60,
+            "optional": 30
+        }
+        scores["enforcement"] = enforcement_map.get(
+            control.get("enforcement_level", "").lower(), 50
+        )
+        
+        # 4. Scope (0-100)
+        statement_length = len(control.get("control_statement", ""))
+        if statement_length > 200:
+            scores["scope"] = 80
+        elif statement_length > 100:
+            scores["scope"] = 60
+        else:
+            scores["scope"] = 40
+        
+        # Boost for implementation guidance
+        if control.get("implementation_guidance") == "detailed":
+            scores["scope"] += 20
+        
+        # 5. Independence (0-100) - governance specific
+        if control.get("control_domain") == "governance":
+            independence_keywords = ["independent", "separate", "does not report", "no reporting"]
+            if any(kw in statement for kw in independence_keywords):
+                scores["independence"] = 90
+            else:
+                scores["independence"] = 50
+        else:
+            scores["independence"] = 50  # N/A for non-governance
+        
+        # Cap all scores at 100
+        for key in scores:
+            scores[key] = min(scores[key], 100)
+        
+        # Calculate weighted overall score
+        weights = {
+            "prescriptiveness": 0.25,
+            "measurability": 0.25,
+            "enforcement": 0.25,
+            "scope": 0.15,
+            "independence": 0.10
+        }
+        
+        overall = sum(scores[k] * weights[k] for k in scores)
+        scores["overall"] = round(overall, 2)
+        
+        return scores
+
+
+    def group_similar_controls(self, controls: List[Dict]) -> List[List[Dict]]:
+        """Group similar controls using embeddings."""
+        if not controls or len(controls) < 2:
+            return [[c] for c in controls]
+        
+        # Create embeddings
+        statements = [c.get("control_statement", "") for c in controls]
+        embeddings = np.array(self.embedder.embed_documents(statements))
+        
+        if embeddings.ndim != 2 or embeddings.shape[0] < 2:
+            return [[c] for c in controls]
+        
+        # Calculate similarity
+        sim_matrix = cosine_similarity(embeddings)
+        
+        # Group by domain first, then by similarity
+        domain_groups = defaultdict(list)
+        for i, control in enumerate(controls):
+            domain = control.get("control_domain", "general")
+            domain_groups[domain].append((i, control))
+        
+        final_groups = []
+        
+        for domain, items in domain_groups.items():
+            if len(items) == 1:
+                final_groups.append([items[0][1]])
+                continue
+            
+            indices = [i for i, _ in items]
+            visited = set()
+            
+            for idx in indices:
+                if idx in visited:
+                    continue
+                    
+                group = [controls[idx]]
+                visited.add(idx)
+                
+                for other_idx in indices:
+                    if other_idx not in visited and sim_matrix[idx][other_idx] >= SIM_THRESHOLD:
+                        group.append(controls[other_idx])
+                        visited.add(other_idx)
+                
+                if len(group) > 0:
+                    final_groups.append(group)
+        
+        return final_groups
+
+
+    def run(self, controls: List[Dict]) -> Dict:
+        """Run complete stringency analysis."""
+        if not controls:
+            return {
+                "domain_analysis": {},
+                "control_groups": [],
+                "overall_stringency": {}
+            }
+        
+        # Calculate stringency for each control
+        for control in controls:
+            control["stringency_scores"] = self.calculate_stringency(control)
+        
+        # Group similar controls
+        groups = self.group_similar_controls(controls)
+        
+        # Analyze each group
+        analyzed_groups = []
+        for group in groups:
+            if not group:
+                continue
+            
+            # Find most stringent control in group
+            strongest = max(group, key=lambda x: x["stringency_scores"]["overall"])
+            
+            # Calculate compliance percentages
+            comparisons = []
+            for ctrl in group:
+                compliance_pct = min(
+                    (ctrl["stringency_scores"]["overall"] / 
+                     strongest["stringency_scores"]["overall"]) * 100,
+                    100
+                )
+                
+                comparisons.append({
+                    "source": ctrl["source"],
+                    "control_statement": ctrl["control_statement"][:200] + "...",
+                    "stringency_scores": ctrl["stringency_scores"],
+                    "compliance_percentage": round(compliance_pct, 1)
+                })
+            
+            analyzed_groups.append({
+                "control_domain": strongest["control_domain"],
+                "risk_addressed": strongest.get("risk_addressed", "Not specified"),
+                "most_stringent_source": strongest["source"],
+                "most_stringent_control": strongest["control_statement"][:200] + "...",
+                "baseline_stringency": strongest["stringency_scores"],
+                "comparisons": comparisons,
+                "group_size": len(group)
+            })
+        
+        # Domain-level aggregation
+        domain_analysis = self._analyze_by_domain(controls, analyzed_groups)
+        
+        # Overall stringency by source
+        overall_stringency = self._calculate_overall_stringency(controls)
+        
+        return {
+            "domain_analysis": domain_analysis,
+            "control_groups": analyzed_groups,
+            "overall_stringency": overall_stringency,
+            "total_controls": len(controls),
+            "total_groups": len(analyzed_groups)
+        }
+
+
+    def _analyze_by_domain(self, controls: List[Dict], groups: List[Dict]) -> Dict:
+        """Aggregate stringency by domain."""
+        domain_data = defaultdict(lambda: {
+            "sources": defaultdict(list),
+            "group_count": 0
+        })
+        
+        for group in groups:
+            domain = group["control_domain"]
+            domain_data[domain]["group_count"] += 1
+            
+            for comparison in group["comparisons"]:
+                source = comparison["source"]
+                score = comparison["stringency_scores"]["overall"]
+                domain_data[domain]["sources"][source].append(score)
+        
+        # Calculate averages
+        result = {}
+        for domain, data in domain_data.items():
+            source_avgs = {}
+            for source, scores in data["sources"].items():
+                source_avgs[source] = round(np.mean(scores), 2)
+            
+            # Determine winner
+            if source_avgs:
+                winner = max(source_avgs.items(), key=lambda x: x[1])
+                result[domain] = {
+                    "control_groups": data["group_count"],
+                    "source_scores": source_avgs,
+                    "most_stringent": winner[0],
+                    "winner_score": winner[1]
+                }
+        
+        return result
+
+
+    def _calculate_overall_stringency(self, controls: List[Dict]) -> Dict:
+        """Calculate overall stringency by source."""
+        source_scores = defaultdict(list)
+        
+        for ctrl in controls:
+            source = ctrl["source"]
+            overall_score = ctrl["stringency_scores"]["overall"]
+            source_scores[source].append(overall_score)
+        
+        result = {}
+        for source, scores in source_scores.items():
+            result[source] = {
+                "average_stringency": round(np.mean(scores), 2),
+                "median_stringency": round(np.median(scores), 2),
+                "control_count": len(scores),
+                "score_distribution": {
+                    "high (80-100)": sum(1 for s in scores if s >= 80),
+                    "medium (60-79)": sum(1 for s in scores if 60 <= s < 80),
+                    "low (0-59)": sum(1 for s in scores if s < 60)
+                }
+            }
+        
+        return result
+
+
+class ReportGeneratorAgent:
+    """Generates comprehensive comparison report."""
+    
+    def __init__(self, model: str):
+        self.llm = Ollama(model=model, base_url=OLLAMA_URL, temperature=0.3)
+
+    def run(self, 
+            document_analyses: Dict,
+            stringency_analysis: Dict,
+            filenames: List[str]) -> str:
+        
+        # Create structured summary for LLM
+        summary = {
+            "documents_analyzed": filenames,
+            "framework_characteristics": document_analyses,
+            "stringency_findings": {
+                "overall_scores": stringency_analysis.get("overall_stringency", {}),
+                "domain_winners": {
+                    domain: data.get("most_stringent")
+                    for domain, data in stringency_analysis.get("domain_analysis", {}).items()
+                },
+                "total_control_groups": stringency_analysis.get("total_groups", 0)
+            }
+        }
+        
+        prompt = f"""You are a Chief Information Security Officer creating a regulatory comparison report.
+
+Based on the analysis below, create a comprehensive report with these sections:
+
+# Executive Summary
+- Brief overview of frameworks compared
+- Key finding: which framework is more stringent overall and by what percentage
+- Critical differences highlighted
+
+# Framework Overview
+- Brief description of each framework
+- Regulatory approach (rules-based vs principles-based)
+- Target audience and scope
+
+# Domain-by-Domain Comparison
+For each domain, state:
+- Which framework is more stringent
+- By what margin
+- Key differences
+- Reasoning
+
+# Commonalities
+- Controls that are similar across frameworks
+- Areas of alignment
+
+# Differences
+- Unique requirements in each framework
+- Coverage gaps
+
+# Compliance Gap Analysis
+- If complying with Framework A, what % compliance with Framework B
+- Vice versa
+- Critical gaps to address
+
+# Strategic Recommendations
+- For organizations subject to both
+- For organizations subject to only one
+- Prioritization guidance
+
+# Conclusion
+- Summary of key insights
+- Best practice recommendation
+
+ANALYSIS DATA:
+{json.dumps(summary, indent=2)}
+
+STRINGENCY DETAILS:
+{json.dumps(stringency_analysis.get("domain_analysis", {}), indent=2)}
+
+Create a professional, detailed report in markdown format. Be specific with percentages and scores. Provide reasoning for assessments."""
+
+        report = self.llm.invoke(prompt)
+        return report
+
+
+# ------------------------------------------------------------------
+# ENHANCED PIPELINE
+# ------------------------------------------------------------------
+def compare_regulatory_documents(
+    file_paths: List[str],
+    filenames: List[str],
+    selected_model: str
+) -> Dict:
+    """
+    Enhanced regulatory comparison pipeline.
+    """
+    print(f"[INFO] Starting analysis with model: {selected_model}")
+    print(f"[INFO] Documents: {filenames}")
+    
+    # 1. Load documents
+    docs = []
+    for path, name in zip(file_paths, filenames):
+        try:
+            loader = PyPDFLoader(path) if path.endswith(".pdf") else TextLoader(path)
+            loaded = loader.load()
+            for d in loaded:
+                d.metadata["source"] = name
+            docs.extend(loaded)
+            print(f"[INFO] Loaded {len(loaded)} pages from {name}")
+        except Exception as e:
+            print(f"[ERROR] Failed to load {name}: {e}")
+            continue
+    
+    if not docs:
+        return {
+            "success": False,
+            "error": "Failed to load any documents"
+        }
+    
+    # 2. Split documents
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        separators=["\n\n", "\n", ". ", " ", ""]
+    )
+    chunks = splitter.split_documents(docs)
+    print(f"[INFO] Created {len(chunks)} chunks")
+    
+    # 3. Initialize agents
+    doc_analyzer = DocumentAnalyzerAgent(selected_model)
+    control_extractor = ControlExtractorAgent(selected_model)
+    stringency_analyzer = StringencyAnalyzerAgent()
+    report_generator = ReportGeneratorAgent(selected_model)
+    
+    # 4. Analyze documents
+    print("[INFO] Analyzing document frameworks...")
+    document_analyses = doc_analyzer.run(chunks, filenames)
+    
+    # 5. Extract controls
+    print("[INFO] Extracting risk controls...")
+    controls = control_extractor.run(chunks)
+    print(f"[INFO] Extracted {len(controls)} controls")
+    
+    if len(controls) < 5:
+        print("[WARNING] Very few controls extracted, results may be limited")
+    
+    # 6. Analyze stringency
+    print("[INFO] Analyzing stringency...")
+    stringency_analysis = stringency_analyzer.run(controls)
+    
+    # 7. Generate report
+    print("[INFO] Generating comprehensive report...")
+    final_report = report_generator.run(
+        document_analyses,
+        stringency_analysis,
+        filenames
+    )
+    
+    # 8. Compile results
+    result = {
+        "success": True,
+        "analysis_timestamp": datetime.now().isoformat(),
+        "model_used": selected_model,
+        "documents": filenames,
+        "document_analyses": document_analyses,
+        "extracted_controls": len(controls),
+        "control_groups": stringency_analysis.get("total_groups", 0),
+        "stringency_analysis": stringency_analysis,
+        "final_report": final_report,
+        "metadata": {
+            "chunks_processed": len(chunks),
+            "pages_analyzed": len(docs),
+            "similarity_threshold": SIM_THRESHOLD
+        }
+    }
+    
+    print("[INFO] Analysis complete")
+    return result
+
+
+# ------------------------------------------------------------------
+# OPTIONAL: Generate structured output files
+# ------------------------------------------------------------------
+def save_analysis_artifacts(result: Dict, output_dir: str = "./analysis_output"):
+    """Save analysis results as structured files."""
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Save full JSON
+    with open(f"{output_dir}/full_analysis.json", "w") as f:
+        json.dump(result, f, indent=2)
+    
+    # Save markdown report
+    with open(f"{output_dir}/comparison_report.md", "w") as f:
+        f.write(result.get("final_report", "No report generated"))
+    
+    # Save stringency summary
+    stringency = result.get("stringency_analysis", {})
+    with open(f"{output_dir}/stringency_summary.json", "w") as f:
+        json.dump({
+            "overall": stringency.get("overall_stringency", {}),
+            "by_domain": stringency.get("domain_analysis", {})
+        }, f, indent=2)
+    
+    print(f"[INFO] Analysis artifacts saved to {output_dir}")

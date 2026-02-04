@@ -31,7 +31,7 @@ from utils.pdf_generator import generate_workbook
 from datetime import datetime
 import uuid
 
-from utils.regulatory_comparision import compare_regulatory_documents
+from utils.regulatory_comparision import compare_regulatory_documents, save_analysis_artifacts
 
 # ----------------------------------------------------------------------------
 # Logging
@@ -904,50 +904,147 @@ async def load_vectorstore_api(
     summary="Compare cybersecurity regulations and assess control stringency"
 )
 async def compare_regulations(
-    selected_model: str = Form(...),
-    max_workers: int = Form(4),  # reserved
-    regulation_files: List[UploadFile] = File(...)
+    selected_model: str = Form(..., description="LLM model to use (e.g., llama3, llama3:70b)"),
+    max_workers: int = Form(4, description="Reserved for future parallel processing"),
+    save_artifacts: bool = Form(False, description="Save detailed analysis artifacts to disk"),
+    output_format: str = Form("json", description="Response format: json or markdown"),
+    regulation_files: List[UploadFile] = File(..., description="Regulatory documents to compare (min 2)")
 ):
+    """
+    Compare regulatory frameworks with detailed stringency analysis.
+    
+    This endpoint:
+    1. Analyzes document structure and regulatory approach
+    2. Extracts all risk control requirements
+    3. Groups similar controls across documents
+    4. Calculates multi-dimensional stringency scores
+    5. Generates comprehensive comparison report
+    
+    Returns:
+    - Document framework analysis
+    - Extracted controls with metadata
+    - Stringency scores by domain
+    - Overall compliance gap analysis
+    - Detailed markdown report
+    """
     rid = _req_id()
-    logger.info(f"[{rid}] Regulation comparison request")
+    logger.info(f"[{rid}] Regulation comparison request - Model: {selected_model}")
 
+    # Validation
     if len(regulation_files) < 2:
-        raise HTTPException(400, "At least two regulation files are required")
+        raise HTTPException(
+            status_code=400,
+            detail="At least two regulation files are required for comparison"
+        )
+    
+    if len(regulation_files) > 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Maximum 5 documents supported per comparison"
+        )
 
     tmp_paths, filenames = [], []
+    output_dir = None
 
     try:
+        # Save uploaded files
         for uf in regulation_files:
+            # Validate file type
+            if not uf.filename.lower().endswith(('.pdf', '.txt', '.md')):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported file type: {uf.filename}. Use PDF, TXT, or MD."
+                )
+            
             ext = Path(uf.filename).suffix or ".tmp"
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
-            tmp.write(await uf.read())
+            content = await uf.read()
+            
+            if len(content) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Empty file: {uf.filename}"
+                )
+            
+            tmp.write(content)
             tmp.close()
             tmp_paths.append(tmp.name)
             filenames.append(uf.filename)
+            
+            logger.info(f"[{rid}] Uploaded: {uf.filename} ({len(content)} bytes)")
 
+        # Run enhanced comparison
+        logger.info(f"[{rid}] Starting analysis...")
         result = compare_regulatory_documents(
             file_paths=tmp_paths,
             filenames=filenames,
             selected_model=selected_model
         )
+        
+        # Check for errors
+        if not result.get("success", False):
+            error_msg = result.get("error", "Unknown error during analysis")
+            logger.error(f"[{rid}] Analysis failed: {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
+        
+        logger.info(f"[{rid}] Analysis complete - {result.get('extracted_controls', 0)} controls, "
+                   f"{result.get('control_groups', 0)} groups")
 
-        return {
-            "success": True,
-            "model_used": selected_model,
-            **result
-        }
+        # Save artifacts if requested
+        if save_artifacts:
+            output_dir = f"./analysis_output/{rid}"
+            save_analysis_artifacts(result, output_dir)
+            result["artifacts_location"] = output_dir
+            logger.info(f"[{rid}] Artifacts saved to {output_dir}")
 
+        # Return based on format
+        if output_format.lower() == "markdown":
+            # Return just the markdown report
+            return JSONResponse({
+                "success": True,
+                "request_id": rid,
+                "model_used": selected_model,
+                "documents": filenames,
+                "report": result.get("final_report", ""),
+                "summary": {
+                    "controls_extracted": result.get("extracted_controls", 0),
+                    "control_groups": result.get("control_groups", 0),
+                    "overall_stringency": result.get("stringency_analysis", {}).get("overall_stringency", {})
+                }
+            })
+        else:
+            # Return full JSON
+            return JSONResponse({
+                "success": True,
+                "request_id": rid,
+                **result
+            })
+
+    except HTTPException:
+        raise
+    
     except Exception as e:
         logger.error(f"[{rid}] Regulatory comparison failed")
         logger.error(traceback.format_exc())
-        raise HTTPException(500, str(e))
+        
+        # Return detailed error info
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": str(e),
+                "request_id": rid,
+                "traceback": traceback.format_exc() if os.getenv("DEBUG") else None
+            }
+        )
 
     finally:
+        # Cleanup temporary files
         for p in tmp_paths:
             try:
                 os.unlink(p)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"[{rid}] Failed to delete temp file {p}: {e}")
+
 
 # ----------------------------------------------------------------------------
 # Run with:  uvicorn api.main:app --reload
