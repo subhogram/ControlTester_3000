@@ -111,6 +111,10 @@ export default function ChatPage() {
   });
 
   const handleSendMessage = async (content: string) => {
+    const messageAttachments = uploadedFiles.length > 0
+      ? uploadedFiles.map(file => ({ name: file.name, size: file.size }))
+      : undefined;
+
     const userMessage: Message = {
       id: Date.now().toString(),
       role: "user",
@@ -119,6 +123,7 @@ export default function ChatPage() {
         hour: "2-digit",
         minute: "2-digit",
       }),
+      attachments: messageAttachments,
     };
 
     setMessages((prev) => [...prev, userMessage]);

@@ -1,19 +1,22 @@
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { User, Bot, Loader2 } from "lucide-react";
+import { User, Bot, Loader2, Paperclip } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import type { MessageAttachment } from "@/types";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
   content: string;
   timestamp?: string;
+  attachments?: MessageAttachment[];
 }
 
 export default function ChatMessage({
   role,
   content,
   timestamp,
+  attachments,
 }: ChatMessageProps) {
   const isUser = role === "user";
   const isLoading = content === "loading";
@@ -127,6 +130,23 @@ export default function ChatMessage({
             </div>
           )}
         </div>
+        {attachments && attachments.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-1 px-1" data-testid="container-attachments">
+            {attachments.map((file, index) => (
+              <div
+                key={`${file.name}-${index}`}
+                className="flex items-center gap-1.5 px-2 py-1 bg-muted/70 rounded-md text-xs text-muted-foreground"
+                data-testid={`attachment-${index}`}
+              >
+                <Paperclip className="h-3 w-3" />
+                <span className="truncate max-w-[150px]">{file.name}</span>
+                <span className="text-muted-foreground/60">
+                  ({(file.size / 1024).toFixed(1)} KB)
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         {timestamp && (
           <span className="text-xs text-muted-foreground px-2" data-testid="text-timestamp">
             {timestamp}

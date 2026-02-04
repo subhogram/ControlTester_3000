@@ -1,12 +1,6 @@
 import { useEffect, useRef } from "react";
 import ChatMessage from "./ChatMessage";
-
-interface Message {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp?: string;
-}
+import type { Message } from "@/types";
 
 interface ChatMessagesProps {
   messages: Message[];
@@ -34,6 +28,7 @@ export default function ChatMessages({ messages }: ChatMessagesProps) {
             role={message.role}
             content={message.content}
             timestamp={message.timestamp}
+            attachments={message.attachments}
           />
         ))}
       </div>
