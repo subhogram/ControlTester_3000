@@ -62,6 +62,22 @@ app = FastAPI(
     ]
 )
 
+from dataclasses import dataclass
+from typing import BinaryIO
+
+@dataclass
+class FileWrapper:
+    # file: BinaryIO
+    # filename: str
+
+    def __init__(self, filepath, filename):
+        self.name = filename  # Original filename for extension detection
+        self._path = filepath
+
+    def read(self):
+        with open(self._path, 'rb') as f:
+            return f.read()
+
 # Candidate directories where generated reports may be stored inside the container
 DEFAULT_REPORT_DIR = Path.cwd() / "app"
 API_DIR = Path(__file__).parent
@@ -598,7 +614,8 @@ async def build_kb(
     delay_between_batches: float = Form(_Cfg.DEFAULT_DELAY),
     max_retries: int = Form(_Cfg.DEFAULT_RETRIES),
     files: List[UploadFile] = File(...),
-    kb_type: str = Form("global", description="Type of KB: global/company/evidence")
+    kb_type: str = Form("global", description="Type of KB: global/company/evidence"),
+    files_source: str = Form("User Upload", description="Source of the uploaded files")
 ):
     rid = _req_id()
     t0 = time.time()
@@ -631,12 +648,12 @@ async def build_kb(
         for uf in files:
             start = time.time()
             ext = Path(uf.filename).suffix or ".tmp"
+
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
             tmp.write(await uf.read())
             tmp.close()
-            tmp_paths.append(tmp.name)
-            fh = open(tmp.name, "rb")
-            file_objs.append(fh)
+            file_objs.append(FileWrapper(tmp.name, uf.filename))
+
             file_results.append(FileResult(
                 filename=uf.filename,
                 size_bytes=uf.size or 0,
@@ -646,6 +663,7 @@ async def build_kb(
 
         vectorstore = build_knowledge_base(
             files=file_objs,
+            source=files_source,
             selected_model=selected_model,
             batch_size=batch_size,
             delay_between_batches=delay_between_batches,
@@ -716,25 +734,33 @@ async def assess_evidence(
 
     try:  
         for uf in evidence_files:
+            # start = time.time()
+            # ext = Path(uf.filename).suffix or ".tmp"
+            # print("Processing evidence file:", uf.filename)
+            # tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            # content = await uf.read()
+            # tmp.write(content)
+            # tmp.close()
+            # tmp_paths.append(tmp.name)
+            # fh = open(tmp.name, "rb")
+
+            # evidence_objs.append(
+            #     FileObj(
+            #         file=fh,
+            #         filename=uf.filename  # ✅ PRESERVED
+            #     )
+            # )
+
             start = time.time()
             ext = Path(uf.filename).suffix or ".tmp"
+
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
             content = await uf.read()
             tmp.write(content)
             tmp.close()
-            tmp_paths.append(tmp.name)
-
-            # Create a file-like object that save_and_load_files expects
-            class FileWrapper:
-                def __init__(self, filepath, filename):
-                    self.name = filename  # Original filename for extension detection
-                    self._path = filepath
-
-                def read(self):
-                    with open(self._path, 'rb') as f:
-                        return f.read()
 
             evidence_objs.append(FileWrapper(tmp.name, uf.filename))
+
             file_results.append(FileResult(
                 filename=uf.filename,
                 size_bytes=len(content),
@@ -754,6 +780,7 @@ async def assess_evidence(
 
         evidence_vectorstore = build_knowledge_base(
             files=evidence_objs,
+            source="Evidence Upload",
             selected_model=selected_model,
             batch_size=_Cfg.DEFAULT_BATCH,
             delay_between_batches=_Cfg.DEFAULT_DELAY,

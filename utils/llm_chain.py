@@ -64,8 +64,29 @@ text_splitter = RecursiveCharacterTextSplitter(
 
 # ----------------- BASE KNOWLEDGE BASE BUILDER -----------------------
 
+def enrich_chunk_with_metadata(text: str, metadata: dict) -> str:
+    """
+    Injects file-level metadata directly into the text
+    so embeddings carry document identity & purpose.
+    """
+    header = f"""
+    [DOCUMENT METADATA]
+    File Name: {metadata.get("file_name", metadata.get("source", "Unknown"))}
+    File Type: {metadata.get("file_type", "Unknown")}
+    Document Category: {metadata.get("doc_category", "Unknown")}
+    Source: {metadata.get("source", "Unknown")}
+    Control Domain: {metadata.get("control_domain", "N/A")}
+    System / Technology: {metadata.get("system", "N/A")}
+    Section: {metadata.get("section", "Unknown")}
+    Effective Date: {metadata.get("effective_date", "Unknown")}
+    Confidentiality Level: {metadata.get("confidentiality", "Unknown")}
+    ---
+    """
+    return header.strip() + "\n\n[CONTENT]\n" + text.strip()
+
 def build_knowledge_base(
     files,
+    source,
     selected_model=None,
     batch_size=15,
     delay_between_batches=0.2,
@@ -82,7 +103,7 @@ def build_knowledge_base(
     start = time.time()
     all_documents = []
 
-    docs = save_and_load_files(files)
+    docs = save_and_load_files(files, source)
 
     # Extract and split texts into Document objects
     for i, doc in enumerate(docs):
@@ -93,7 +114,14 @@ def build_knowledge_base(
             meta = getattr(doc, "metadata", {}) if hasattr(doc, "metadata") else {}
             
             for split in splits:
-                all_documents.append(Document(page_content=split, metadata=meta))
+                enriched_text = enrich_chunk_with_metadata(split, meta)
+
+                all_documents.append(
+                    Document(
+                        page_content=enriched_text,  # 🔥 metadata is now embedded
+                        metadata=meta                 # keep raw metadata for filtering
+                    )
+                )
                 
         except Exception as e:
             logger.error(f"Error processing document {i}: {e}")
@@ -184,7 +212,7 @@ def extract_and_validate_json(text):
     except Exception as e:
         raise ValueError(f"Could not parse JSON after cleaning: {e}")
 
-def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, selected_model, chunk_index=0, doc_index=0):
+def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, selected_model, chunk_index=0, doc_index=0, filename="N/A"):
     initialize(selected_model)
     try:
         parser = PydanticOutputParser(pydantic_object=Assessment)        
@@ -270,7 +298,7 @@ def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, s
             - Risk Level: One of CRITICAL, HIGH, MEDIUM, LOW
 
             **3. LOG EVIDENCE**
-            - Source File: Name of the log file
+            - Source File: Name of the evidence log file which is being assessed
             - Relevant Log Entries: Copy log lines (with timestamps) that support the assessment
 
             **4. ASSESSMENT RATIONALE**
@@ -350,8 +378,8 @@ def render_text_to_image(evidence_docs, font_size=14, width=1200, bg_color="whit
 
 def assess_evidence_with_kb(evidence_files, kb_vectorstore, company_kb_vectorstore, selected_model, max_workers=4):
     start = time.time()
-    evid_texts, chunk_origin = [], []    
-    evidence_docs = save_and_load_files(evidence_files)
+    evid_texts, chunk_origin = [], []  
+    evidence_docs = save_and_load_files(evidence_files, "Evidence Assessment result")
     for i, doc in enumerate(evidence_docs):
         try:
             if not doc.page_content.strip():

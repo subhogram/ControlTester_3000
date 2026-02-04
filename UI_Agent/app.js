@@ -87,13 +87,14 @@ class DocumentAPI {
         }
     }
 
-    static async buildKnowledgeBase(files, kbType, selectedModel, opts = {}) {
+    static async buildKnowledgeBase(files, kbType, selectedModel, files_source, opts = {}) {
         if (!selectedModel) throw new Error("No model selected");
         if (!files?.length) throw new Error("No files to build KB");
 
         const form = new FormData();
         for (const f of files) form.append("files", f);
-        form.append("selected_model", selectedModel);
+        form.append("selected_model", selectedModel);        
+        form.append("files_source", files_source || "User Upload");
         form.append("kb_type", kbType); // "global" | "company"
         form.append("batch_size", String(opts.batch_size ?? 15));
         form.append("delay_between_batches", String(opts.delay_between_batches ?? 0.2));
@@ -658,8 +659,8 @@ class UIManager {
             const files = this.files[kind];
             const kbType = (kind === "general") ? "global" : "company";
             const saveDir = (kbType === "global") ? "saved_global_vectorstore" : "saved_company_vectorstore";
-
-            const buildRes = await DocumentAPI.buildKnowledgeBase(files, kbType, selected);
+            const source =  (kbType === "global") ? "Global policy and regulations" : "Company policy and regulations";
+            const buildRes = await DocumentAPI.buildKnowledgeBase(files, kbType, selected, source);
             await DocumentAPI.saveVectorstore(kbType, saveDir);
 
             // Update status
@@ -1002,7 +1003,7 @@ class UIManager {
         const kbType = "chat_attachment";
         const saveDir = "chat_attachment_vectorstore";
 
-        const build = await DocumentAPI.buildKnowledgeBase(this.chatAttachments, kbType, selectedModel);
+        const build = await DocumentAPI.buildKnowledgeBase(this.chatAttachments, kbType, selectedModel, "Chat attachments");
         this.chatAttachmentVectors = build.vector_count ?? 0;
         await DocumentAPI.saveVectorstore(kbType, saveDir);
         sessionStorage.setItem("chatAttachmentPath", saveDir);
