@@ -2,54 +2,82 @@ import { createContext, useContext, useState, ReactNode } from "react";
 
 type ComparisonMode = "regulation" | "rcm";
 
-export interface StringencyScore {
-  scope: number;
-  specificity: number;
+export interface DocumentAnalysis {
+  framework_name: string;
+  issuing_authority: string;
+  target_industry: string;
+  regulatory_approach: string | null;
+  key_focus_areas: string[];
+  governance_model: string | null;
+  enforcement_style: string | null;
+  date_issued: string | null;
+}
+
+export interface StringencyScores {
+  prescriptiveness: number;
+  measurability: number;
   enforcement: number;
+  scope: number;
+  independence: number;
   overall: number;
 }
 
-export interface DocumentFramework {
-  document_name: string;
-  framework_type: string;
-  primary_focus: string;
-  regulatory_approach: string;
-  key_themes: string[];
+export interface ControlComparison {
+  source: string;
+  control_statement: string;
+  stringency_scores: StringencyScores;
+  compliance_percentage: number;
 }
 
-export interface ExtractedControl {
-  control_id: string;
-  control_text: string;
-  source_document: string;
+export interface ControlGroupItem {
   control_domain: string;
-  stringency_indicators: string[];
+  risk_addressed: string;
+  most_stringent_source: string;
+  most_stringent_control: string;
+  baseline_stringency: StringencyScores;
+  comparisons: ControlComparison[];
+  group_size: number;
 }
 
-export interface ControlGroup {
-  group_id: string;
-  common_theme: string;
-  controls: ExtractedControl[];
-  stringency_comparison: Record<string, StringencyScore>;
+export interface DomainAnalysisItem {
+  control_groups: number;
+  source_scores: Record<string, number>;
+  most_stringent: string;
+  winner_score: number;
+}
+
+export interface OverallStringencyItem {
+  average_stringency: number;
+  median_stringency: number;
+  control_count: number;
+  score_distribution: Record<string, number>;
 }
 
 export interface StringencyAnalysis {
-  by_document: Record<string, StringencyScore>;
-  by_domain: Record<string, Record<string, StringencyScore>>;
-  overall_stringency: Record<string, number>;
+  domain_analysis: Record<string, DomainAnalysisItem>;
+  control_groups: ControlGroupItem[];
+  overall_stringency: Record<string, OverallStringencyItem>;
+  total_controls: number;
+  total_groups: number;
 }
 
 export interface ComparisonResultsData {
   success: boolean;
   request_id: string;
+  analysis_timestamp?: string;
   model_used?: string;
   documents?: string[];
-  document_frameworks?: DocumentFramework[];
+  document_analyses?: Record<string, DocumentAnalysis>;
   extracted_controls?: number;
   control_groups?: number;
-  controls_by_document?: Record<string, ExtractedControl[]>;
-  grouped_controls?: ControlGroup[];
   stringency_analysis?: StringencyAnalysis;
   final_report?: string;
+  metadata?: {
+    chunks_processed: number;
+    pages_analyzed: number;
+    similarity_threshold: number;
+  };
+  artifacts_location?: string;
   error?: string;
 }
 

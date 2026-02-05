@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { useRegulatoryTesting, ComparisonResultsData, DocumentFramework, ControlGroup, StringencyAnalysis } from "@/contexts/RegulatoryTestingContext";
+import { useRegulatoryTesting, ComparisonResultsData } from "@/contexts/RegulatoryTestingContext";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -475,18 +475,22 @@ export default function RegulatoryTestingPage() {
                       {comparisonResults.stringency_analysis?.overall_stringency && (
                         <div className="space-y-2">
                           <h4 className="font-medium">Overall Stringency Scores</h4>
-                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                            {Object.entries(comparisonResults.stringency_analysis.overall_stringency).map(([doc, score]) => (
-                              <div key={doc} className="p-3 border rounded-lg">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {Object.entries(comparisonResults.stringency_analysis.overall_stringency).map(([doc, data]) => (
+                              <div key={doc} className="p-3 border rounded-lg space-y-2">
                                 <p className="text-sm font-medium truncate" title={doc}>{doc}</p>
-                                <div className="flex items-center gap-2 mt-1">
+                                <div className="flex items-center gap-2">
                                   <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
                                     <div 
                                       className="h-full bg-primary rounded-full transition-all"
-                                      style={{ width: `${Math.min(100, (score as number) * 10)}%` }}
+                                      style={{ width: `${Math.min(100, data.average_stringency)}%` }}
                                     />
                                   </div>
-                                  <span className="text-sm font-mono">{(score as number).toFixed(1)}</span>
+                                  <span className="text-sm font-mono">{data.average_stringency.toFixed(1)}</span>
+                                </div>
+                                <div className="flex gap-4 text-xs text-muted-foreground">
+                                  <span>Median: {data.median_stringency.toFixed(1)}</span>
+                                  <span>Controls: {data.control_count}</span>
                                 </div>
                               </div>
                             ))}
@@ -509,34 +513,50 @@ export default function RegulatoryTestingPage() {
                 </TabsContent>
 
                 <TabsContent value="frameworks" className="space-y-4">
-                  {comparisonResults.document_frameworks?.map((framework, idx) => (
-                    <Card key={idx}>
-                      <CardHeader>
-                        <CardTitle className="text-lg">{framework.document_name}</CardTitle>
-                        <CardDescription>{framework.framework_type}</CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-3">
-                        <div>
-                          <p className="text-sm font-medium text-muted-foreground">Primary Focus</p>
-                          <p className="text-sm">{framework.primary_focus}</p>
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-muted-foreground">Regulatory Approach</p>
-                          <p className="text-sm">{framework.regulatory_approach}</p>
-                        </div>
-                        {framework.key_themes && framework.key_themes.length > 0 && (
-                          <div>
-                            <p className="text-sm font-medium text-muted-foreground mb-2">Key Themes</p>
-                            <div className="flex flex-wrap gap-2">
-                              {framework.key_themes.map((theme, tidx) => (
-                                <Badge key={tidx} variant="outline">{theme}</Badge>
-                              ))}
+                  {comparisonResults.document_analyses && Object.keys(comparisonResults.document_analyses).length > 0 ? (
+                    Object.entries(comparisonResults.document_analyses).map(([docName, analysis], idx) => (
+                      <Card key={idx}>
+                        <CardHeader>
+                          <CardTitle className="text-lg">{docName}</CardTitle>
+                          <CardDescription>{analysis.framework_name}</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-sm font-medium text-muted-foreground">Issuing Authority</p>
+                              <p className="text-sm">{analysis.issuing_authority || "N/A"}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-muted-foreground">Target Industry</p>
+                              <p className="text-sm">{analysis.target_industry || "N/A"}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-muted-foreground">Regulatory Approach</p>
+                              <p className="text-sm">{analysis.regulatory_approach || "N/A"}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-muted-foreground">Governance Model</p>
+                              <p className="text-sm">{analysis.governance_model || "N/A"}</p>
+                            </div>
+                            <div>
+                              <p className="text-sm font-medium text-muted-foreground">Enforcement Style</p>
+                              <p className="text-sm">{analysis.enforcement_style || "N/A"}</p>
                             </div>
                           </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  )) || (
+                          {analysis.key_focus_areas && analysis.key_focus_areas.length > 0 && (
+                            <div>
+                              <p className="text-sm font-medium text-muted-foreground mb-2">Key Focus Areas</p>
+                              <div className="flex flex-wrap gap-2">
+                                {analysis.key_focus_areas.map((area, tidx) => (
+                                  <Badge key={tidx} variant="outline">{area}</Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))
+                  ) : (
                     <Card>
                       <CardContent className="py-8 text-center text-muted-foreground">
                         No framework analysis available
@@ -547,37 +567,75 @@ export default function RegulatoryTestingPage() {
 
                 <TabsContent value="controls" className="space-y-4">
                   <ScrollArea className="h-[500px]">
-                    {comparisonResults.grouped_controls?.map((group, gidx) => (
-                      <Collapsible key={gidx} className="mb-4">
-                        <Card>
-                          <CollapsibleTrigger className="w-full">
-                            <CardHeader className="flex flex-row items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <ChevronRight className="h-4 w-4 transition-transform duration-200 group-data-[state=open]:rotate-90" />
-                                <CardTitle className="text-base">{group.common_theme}</CardTitle>
-                              </div>
-                              <Badge variant="secondary">{group.controls?.length || 0} controls</Badge>
-                            </CardHeader>
-                          </CollapsibleTrigger>
-                          <CollapsibleContent>
-                            <CardContent className="space-y-3 pt-0">
-                              {group.controls?.map((control, cidx) => (
-                                <div key={cidx} className="p-3 bg-muted/30 rounded-lg space-y-2">
-                                  <div className="flex items-center justify-between">
-                                    <Badge variant="outline">{control.control_id}</Badge>
-                                    <span className="text-xs text-muted-foreground">{control.source_document}</span>
+                    {comparisonResults.stringency_analysis?.control_groups && comparisonResults.stringency_analysis.control_groups.length > 0 ? (
+                      comparisonResults.stringency_analysis.control_groups.map((group, gidx) => (
+                        <Collapsible key={gidx} className="mb-4">
+                          <Card>
+                            <CollapsibleTrigger className="w-full">
+                              <CardHeader className="flex flex-row items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  <ChevronRight className="h-4 w-4 shrink-0 transition-transform duration-200" />
+                                  <div className="text-left min-w-0">
+                                    <CardTitle className="text-base capitalize">{group.control_domain.replace(/_/g, " ")}</CardTitle>
+                                    <p className="text-xs text-muted-foreground">Risk: {group.risk_addressed}</p>
                                   </div>
-                                  <p className="text-sm">{control.control_text}</p>
-                                  {control.control_domain && (
-                                    <Badge variant="secondary" className="text-xs">{control.control_domain}</Badge>
-                                  )}
                                 </div>
-                              ))}
-                            </CardContent>
-                          </CollapsibleContent>
-                        </Card>
-                      </Collapsible>
-                    )) || (
+                                <Badge variant="secondary" className="shrink-0">Score: {group.baseline_stringency.overall.toFixed(1)}</Badge>
+                              </CardHeader>
+                            </CollapsibleTrigger>
+                            <CollapsibleContent>
+                              <CardContent className="space-y-3 pt-0">
+                                <div className="p-3 bg-muted/30 rounded-lg space-y-2">
+                                  <div className="flex items-center justify-between flex-wrap gap-2">
+                                    <Badge variant="outline">Most Stringent</Badge>
+                                    <span className="text-xs text-muted-foreground">{group.most_stringent_source}</span>
+                                  </div>
+                                  <p className="text-sm">{group.most_stringent_control}</p>
+                                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-2">
+                                    <div className="text-center p-2 bg-background rounded">
+                                      <p className="text-xs text-muted-foreground">Prescriptive</p>
+                                      <p className="font-medium">{group.baseline_stringency.prescriptiveness}</p>
+                                    </div>
+                                    <div className="text-center p-2 bg-background rounded">
+                                      <p className="text-xs text-muted-foreground">Measurability</p>
+                                      <p className="font-medium">{group.baseline_stringency.measurability}</p>
+                                    </div>
+                                    <div className="text-center p-2 bg-background rounded">
+                                      <p className="text-xs text-muted-foreground">Enforcement</p>
+                                      <p className="font-medium">{group.baseline_stringency.enforcement}</p>
+                                    </div>
+                                    <div className="text-center p-2 bg-background rounded">
+                                      <p className="text-xs text-muted-foreground">Scope</p>
+                                      <p className="font-medium">{group.baseline_stringency.scope}</p>
+                                    </div>
+                                    <div className="text-center p-2 bg-background rounded">
+                                      <p className="text-xs text-muted-foreground">Independence</p>
+                                      <p className="font-medium">{group.baseline_stringency.independence}</p>
+                                    </div>
+                                  </div>
+                                </div>
+                                {group.comparisons && group.comparisons.length > 0 && (
+                                  <div className="space-y-2">
+                                    <p className="text-sm font-medium">Comparisons ({group.comparisons.length})</p>
+                                    {group.comparisons.map((comp, cidx) => (
+                                      <div key={cidx} className="p-2 border rounded-lg text-sm">
+                                        <div className="flex justify-between items-center mb-1">
+                                          <span className="font-medium truncate">{comp.source}</span>
+                                          <Badge variant="outline" className="text-xs">
+                                            {comp.compliance_percentage.toFixed(0)}% compliance
+                                          </Badge>
+                                        </div>
+                                        <p className="text-muted-foreground text-xs">{comp.control_statement}</p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </CardContent>
+                            </CollapsibleContent>
+                          </Card>
+                        </Collapsible>
+                      ))
+                    ) : (
                       <Card>
                         <CardContent className="py-8 text-center text-muted-foreground">
                           No control groups available

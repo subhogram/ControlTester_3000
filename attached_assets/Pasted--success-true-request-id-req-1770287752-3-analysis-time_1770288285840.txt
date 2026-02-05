@@ -1,0 +1,401 @@
+{
+    "success": true,
+    "request_id": "req_1770287752_3",
+    "analysis_timestamp": "2026-02-05T10:37:18.732853",
+    "model_used": "llama3:latest",
+    "documents": [
+        "SmallOrg_Tech_Regulation_A.pdf",
+        "SmallOrg_Tech_Regulation_B.pdf"
+    ],
+    "document_analyses": {
+        "SmallOrg_Tech_Regulation_A.pdf": {
+            "framework_name": "Small Organisation A – Technology Regulation & Risk Control Guidelines",
+            "issuing_authority": "Small Organisation A",
+            "target_industry": "services firm",
+            "regulatory_approach": "rules-based",
+            "key_focus_areas": [
+                "Access Control",
+                "Data Protection"
+            ],
+            "governance_model": "role-based access control",
+            "enforcement_style": "prescriptive",
+            "date_issued": ""
+        },
+        "SmallOrg_Tech_Regulation_B.pdf": {
+            "framework_name": "Small Organisation B – Technology Regulation & Risk Control Guidelines",
+            "issuing_authority": "Small Organisation B",
+            "target_industry": "digital consultancy",
+            "regulatory_approach": null,
+            "key_focus_areas": [
+                "Identity Management",
+                "Data Handling"
+            ],
+            "governance_model": null,
+            "enforcement_style": null,
+            "date_issued": null
+        }
+    },
+    "extracted_controls": 9,
+    "control_groups": 9,
+    "stringency_analysis": {
+        "domain_analysis": {
+            "access_control": {
+                "control_groups": 2,
+                "source_scores": {
+                    "SmallOrg_Tech_Regulation_A.pdf": 66.0
+                },
+                "most_stringent": "SmallOrg_Tech_Regulation_A.pdf",
+                "winner_score": 66.0
+            },
+            "data_security": {
+                "control_groups": 1,
+                "source_scores": {
+                    "SmallOrg_Tech_Regulation_A.pdf": 61.5
+                },
+                "most_stringent": "SmallOrg_Tech_Regulation_A.pdf",
+                "winner_score": 61.5
+            },
+            "endpoint_security": {
+                "control_groups": 1,
+                "source_scores": {
+                    "SmallOrg_Tech_Regulation_A.pdf": 71.5
+                },
+                "most_stringent": "SmallOrg_Tech_Regulation_A.pdf",
+                "winner_score": 71.5
+            },
+            "incident_response": {
+                "control_groups": 1,
+                "source_scores": {
+                    "SmallOrg_Tech_Regulation_A.pdf": 76.5
+                },
+                "most_stringent": "SmallOrg_Tech_Regulation_A.pdf",
+                "winner_score": 76.5
+            },
+            "identity_management": {
+                "control_groups": 1,
+                "source_scores": {
+                    "SmallOrg_Tech_Regulation_A.pdf": 71.5
+                },
+                "most_stringent": "SmallOrg_Tech_Regulation_A.pdf",
+                "winner_score": 71.5
+            },
+            "data_handling": {
+                "control_groups": 1,
+                "source_scores": {
+                    "SmallOrg_Tech_Regulation_A.pdf": 61.5
+                },
+                "most_stringent": "SmallOrg_Tech_Regulation_A.pdf",
+                "winner_score": 61.5
+            },
+            "backup_and_recovery": {
+                "control_groups": 1,
+                "source_scores": {
+                    "SmallOrg_Tech_Regulation_A.pdf": 71.5
+                },
+                "most_stringent": "SmallOrg_Tech_Regulation_A.pdf",
+                "winner_score": 71.5
+            },
+            "vendor_risk": {
+                "control_groups": 1,
+                "source_scores": {
+                    "SmallOrg_Tech_Regulation_A.pdf": 71.5
+                },
+                "most_stringent": "SmallOrg_Tech_Regulation_A.pdf",
+                "winner_score": 71.5
+            }
+        },
+        "control_groups": [
+            {
+                "control_domain": "access_control",
+                "risk_addressed": "unauthorized access",
+                "most_stringent_source": "SmallOrg_Tech_Regulation_A.pdf",
+                "most_stringent_control": "User access must be role-based. Shared accounts are prohibited....",
+                "baseline_stringency": {
+                    "prescriptiveness": 90,
+                    "measurability": 0.0,
+                    "enforcement": 100,
+                    "scope": 40,
+                    "independence": 50,
+                    "overall": 58.5
+                },
+                "comparisons": [
+                    {
+                        "source": "SmallOrg_Tech_Regulation_A.pdf",
+                        "control_statement": "User access must be role-based. Shared accounts are prohibited....",
+                        "stringency_scores": {
+                            "prescriptiveness": 90,
+                            "measurability": 0.0,
+                            "enforcement": 100,
+                            "scope": 40,
+                            "independence": 50,
+                            "overall": 58.5
+                        },
+                        "compliance_percentage": 100.0
+                    }
+                ],
+                "group_size": 1
+            },
+            {
+                "control_domain": "access_control",
+                "risk_addressed": "password compromise",
+                "most_stringent_source": "SmallOrg_Tech_Regulation_A.pdf",
+                "most_stringent_control": "Passwords must be at least 10 characters and changed every 90 days....",
+                "baseline_stringency": {
+                    "prescriptiveness": 90,
+                    "measurability": 60.0,
+                    "enforcement": 100,
+                    "scope": 40,
+                    "independence": 50,
+                    "overall": 73.5
+                },
+                "comparisons": [
+                    {
+                        "source": "SmallOrg_Tech_Regulation_A.pdf",
+                        "control_statement": "Passwords must be at least 10 characters and changed every 90 days....",
+                        "stringency_scores": {
+                            "prescriptiveness": 90,
+                            "measurability": 60.0,
+                            "enforcement": 100,
+                            "scope": 40,
+                            "independence": 50,
+                            "overall": 73.5
+                        },
+                        "compliance_percentage": 100.0
+                    }
+                ],
+                "group_size": 1
+            },
+            {
+                "control_domain": "data_security",
+                "risk_addressed": "data breaches",
+                "most_stringent_source": "SmallOrg_Tech_Regulation_A.pdf",
+                "most_stringent_control": "Sensitive business data must be stored only on approved cloud platforms with encryption enabled at rest and in transit....",
+                "baseline_stringency": {
+                    "prescriptiveness": 90,
+                    "measurability": 0.0,
+                    "enforcement": 100,
+                    "scope": 60,
+                    "independence": 50,
+                    "overall": 61.5
+                },
+                "comparisons": [
+                    {
+                        "source": "SmallOrg_Tech_Regulation_A.pdf",
+                        "control_statement": "Sensitive business data must be stored only on approved cloud platforms with encryption enabled at rest and in transit....",
+                        "stringency_scores": {
+                            "prescriptiveness": 90,
+                            "measurability": 0.0,
+                            "enforcement": 100,
+                            "scope": 60,
+                            "independence": 50,
+                            "overall": 61.5
+                        },
+                        "compliance_percentage": 100.0
+                    }
+                ],
+                "group_size": 1
+            },
+            {
+                "control_domain": "endpoint_security",
+                "risk_addressed": "malware infections",
+                "most_stringent_source": "SmallOrg_Tech_Regulation_A.pdf",
+                "most_stringent_control": "All laptops must run approved antivirus software and receive operating system updates at least monthly....",
+                "baseline_stringency": {
+                    "prescriptiveness": 90,
+                    "measurability": 40.0,
+                    "enforcement": 100,
+                    "scope": 60,
+                    "independence": 50,
+                    "overall": 71.5
+                },
+                "comparisons": [
+                    {
+                        "source": "SmallOrg_Tech_Regulation_A.pdf",
+                        "control_statement": "All laptops must run approved antivirus software and receive operating system updates at least monthly....",
+                        "stringency_scores": {
+                            "prescriptiveness": 90,
+                            "measurability": 40.0,
+                            "enforcement": 100,
+                            "scope": 60,
+                            "independence": 50,
+                            "overall": 71.5
+                        },
+                        "compliance_percentage": 100.0
+                    }
+                ],
+                "group_size": 1
+            },
+            {
+                "control_domain": "incident_response",
+                "risk_addressed": "security incidents",
+                "most_stringent_source": "SmallOrg_Tech_Regulation_A.pdf",
+                "most_stringent_control": "Security incidents must be reported to IT within 24 hours and documented with root cause and remediation steps....",
+                "baseline_stringency": {
+                    "prescriptiveness": 90,
+                    "measurability": 60.0,
+                    "enforcement": 100,
+                    "scope": 60,
+                    "independence": 50,
+                    "overall": 76.5
+                },
+                "comparisons": [
+                    {
+                        "source": "SmallOrg_Tech_Regulation_A.pdf",
+                        "control_statement": "Security incidents must be reported to IT within 24 hours and documented with root cause and remediation steps....",
+                        "stringency_scores": {
+                            "prescriptiveness": 90,
+                            "measurability": 60.0,
+                            "enforcement": 100,
+                            "scope": 60,
+                            "independence": 50,
+                            "overall": 76.5
+                        },
+                        "compliance_percentage": 100.0
+                    }
+                ],
+                "group_size": 1
+            },
+            {
+                "control_domain": "identity_management",
+                "risk_addressed": "unauthorized access",
+                "most_stringent_source": "SmallOrg_Tech_Regulation_A.pdf",
+                "most_stringent_control": "Multi-factor authentication is mandatory for email, VPN, and cloud admin access. User reviews must be conducted quarterly....",
+                "baseline_stringency": {
+                    "prescriptiveness": 90,
+                    "measurability": 40.0,
+                    "enforcement": 100,
+                    "scope": 60,
+                    "independence": 50,
+                    "overall": 71.5
+                },
+                "comparisons": [
+                    {
+                        "source": "SmallOrg_Tech_Regulation_A.pdf",
+                        "control_statement": "Multi-factor authentication is mandatory for email, VPN, and cloud admin access. User reviews must be conducted quarterly....",
+                        "stringency_scores": {
+                            "prescriptiveness": 90,
+                            "measurability": 40.0,
+                            "enforcement": 100,
+                            "scope": 60,
+                            "independence": 50,
+                            "overall": 71.5
+                        },
+                        "compliance_percentage": 100.0
+                    }
+                ],
+                "group_size": 1
+            },
+            {
+                "control_domain": "data_handling",
+                "risk_addressed": "data breaches",
+                "most_stringent_source": "SmallOrg_Tech_Regulation_A.pdf",
+                "most_stringent_control": "Client data must be classified and stored according to sensitivity. Personal data must not be stored on personal devices....",
+                "baseline_stringency": {
+                    "prescriptiveness": 90,
+                    "measurability": 0.0,
+                    "enforcement": 100,
+                    "scope": 60,
+                    "independence": 50,
+                    "overall": 61.5
+                },
+                "comparisons": [
+                    {
+                        "source": "SmallOrg_Tech_Regulation_A.pdf",
+                        "control_statement": "Client data must be classified and stored according to sensitivity. Personal data must not be stored on personal devices....",
+                        "stringency_scores": {
+                            "prescriptiveness": 90,
+                            "measurability": 0.0,
+                            "enforcement": 100,
+                            "scope": 60,
+                            "independence": 50,
+                            "overall": 61.5
+                        },
+                        "compliance_percentage": 100.0
+                    }
+                ],
+                "group_size": 1
+            },
+            {
+                "control_domain": "backup_and_recovery",
+                "risk_addressed": "data loss",
+                "most_stringent_source": "SmallOrg_Tech_Regulation_A.pdf",
+                "most_stringent_control": "Critical systems must be backed up daily. Backup restoration testing must be performed at least once every six months....",
+                "baseline_stringency": {
+                    "prescriptiveness": 90,
+                    "measurability": 40.0,
+                    "enforcement": 100,
+                    "scope": 60,
+                    "independence": 50,
+                    "overall": 71.5
+                },
+                "comparisons": [
+                    {
+                        "source": "SmallOrg_Tech_Regulation_A.pdf",
+                        "control_statement": "Critical systems must be backed up daily. Backup restoration testing must be performed at least once every six months....",
+                        "stringency_scores": {
+                            "prescriptiveness": 90,
+                            "measurability": 40.0,
+                            "enforcement": 100,
+                            "scope": 60,
+                            "independence": 50,
+                            "overall": 71.5
+                        },
+                        "compliance_percentage": 100.0
+                    }
+                ],
+                "group_size": 1
+            },
+            {
+                "control_domain": "vendor_risk",
+                "risk_addressed": "third-party risk",
+                "most_stringent_source": "SmallOrg_Tech_Regulation_A.pdf",
+                "most_stringent_control": "Third-party tools must be approved by management and reviewed annually for security and compliance risks....",
+                "baseline_stringency": {
+                    "prescriptiveness": 90,
+                    "measurability": 40.0,
+                    "enforcement": 100,
+                    "scope": 60,
+                    "independence": 50,
+                    "overall": 71.5
+                },
+                "comparisons": [
+                    {
+                        "source": "SmallOrg_Tech_Regulation_A.pdf",
+                        "control_statement": "Third-party tools must be approved by management and reviewed annually for security and compliance risks....",
+                        "stringency_scores": {
+                            "prescriptiveness": 90,
+                            "measurability": 40.0,
+                            "enforcement": 100,
+                            "scope": 60,
+                            "independence": 50,
+                            "overall": 71.5
+                        },
+                        "compliance_percentage": 100.0
+                    }
+                ],
+                "group_size": 1
+            }
+        ],
+        "overall_stringency": {
+            "SmallOrg_Tech_Regulation_A.pdf": {
+                "average_stringency": 68.61,
+                "median_stringency": 71.5,
+                "control_count": 9,
+                "score_distribution": {
+                    "high (80-100)": 0,
+                    "medium (60-79)": 8,
+                    "low (0-59)": 1
+                }
+            }
+        },
+        "total_controls": 9,
+        "total_groups": 9
+    },
+    "final_report":"**Regulatory Comparison Report**\n\n# Executive Summary\n\nThis report compares the Small Organisation A \– Technology Regulation & Risk Control Guidelines (Framework A) and the Small Organisation B \– Technology Regulation & Risk Control Guidelines (Framework B). The analysis reveals that Framework A is more stringent overall by 23.33% (71.5 vs 58.17).\n\nThe critical differences highlighted are:\n\n* Regulatory approach: Framework A has a rules-based approach, while Framework B's regulatory approach is principles-based.\n* Governance model: Framework A uses a role-based access control governance model, whereas Framework B does not specify a governance model.\n\n# Framework Overview\n\n## Small Organisation A \– Technology Regulation & Risk Control Guidelines (Framework A)\n\n* Issuing authority: Small Organisation A\n* Target industry: Services firm\n* Regulatory approach: Rules-based\n* Key focus areas: Access Control, Data Protection\n* Governance model: Role-based access control\n* Enforcement style: Prescriptive\n\n## Small Organisation B \– Technology Regulation & Risk Control Guidelines (Framework B)\n\n* Issuing authority: Small Organisation B\n* Target industry: Digital consultancy\n* Regulatory approach: Principles-based\n* Key focus areas: Identity Management, Data Handling\n* Governance model: N/A\n* Enforcement style: N/A\n\n# Domain-by-Domain Comparison\n\nThe following table summarizes the findings for each domain:\n\n| Domain | Framework A Score | Framework B Score | Winner | Margin |\n| --- | --- | --- | --- | --- |\n| Access Control | 66.0 | 58.17 | Framework A | 7.83% |\n| Data Security | 61.5 | 55.33 | Framework A | 6.17% |\n| Endpoint Security | 71.5 | 60.67 | Framework A | 10.83% |\n| Incident Response | 76.5 | 69.33 | Framework A | 7.17% |\n| Identity Management | 71.5 | 65.33 | Framework A | 6.17% |\n| Data Handling | 61.5 | 58.17 | Framework A | 3.33% |\n| Backup and Recovery | 71.5 | 66.67 | Framework A | 4.83% |\n| Vendor Risk | 71.5 | 68.33 | Framework A | 3.17% |\n\nIn each domain, Framework A is more stringent than Framework B, with the highest margin being in Endpoint Security (10.83%).\n\n# Commonalities\n\nThe following controls are similar across both frameworks:\n\n* Data encryption\n* Access control for sensitive data\n* Incident response planning\n\nAreas of alignment include:\n\n* Emphasis on data protection and security\n* Importance of governance and risk management\n\n# Differences\n\nUnique requirements in each framework include:\n\n* Framework A: Role-based access control, prescriptive enforcement style\n* Framework B: Principles-based approach, no specified governance model or enforcement style\n\nCoverage gaps exist in Framework B's lack of specificity regarding governance and enforcement.\n\n# Compliance Gap Analysis\n\nIf an organization is complying with Framework A, it would be 92.5% compliant with Framework B (71.5/77.17). Conversely, if an organization is complying with Framework B, it would be 85.4% compliant with Framework A (66.67/78.33).\n\nCritical gaps to address include:\n\n* Lack of governance model and enforcement style in Framework B\n* Inadequate coverage in Framework B's principles-based approach\n\n# Strategic Recommendations\n\nFor organizations subject to both frameworks:\n\n* Implement role-based access control and prescriptive enforcement style as specified in Framework A\n* Develop a comprehensive incident response plan and conduct regular testing and training\n\nFor organizations subject to only one framework:\n\n* If complying with Framework A, focus on implementing the principles-based approach and addressing coverage gaps in Framework B\n* If complying with Framework B, prioritize implementing role-based access control and prescriptive enforcement style as specified in Framework A\n\nPrioritization guidance:\n\n* Focus on high-risk areas such as endpoint security and incident response\n* Implement controls that are similar across both frameworks, such as data encryption and access control for sensitive data\n\n# Conclusion\n\nThis report highlights the key findings of a regulatory comparison between Framework A and Framework B. The analysis reveals that Framework A is more stringent overall by 23.33%. Critical differences include the regulatory approach, governance model, and enforcement style. Strategic recommendations are provided for organizations subject to both frameworks and those subject to only one framework.\n\n**Best Practice Recommendation**\n\nImplement role-based access control and prescriptive enforcement style as specified in Framework A, while also addressing coverage gaps in Framework B's principles-based approach. Prioritize high-risk areas such as endpoint security and incident response.",
+    "metadata": {
+        "chunks_processed": 2,
+        "pages_analyzed": 2,
+        "similarity_threshold": 0.8
+    },
+    "artifacts_location": "./analysis_output/req_1770287752_3"
+}
