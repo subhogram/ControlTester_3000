@@ -26,9 +26,10 @@ The backend is an Express.js application written in TypeScript. It handles file 
     -   **Company Policy Context**: Supports uploading company-specific policy documents to create a dedicated knowledge base, also with automatic saving and loading.
     -   **Chat Attachments**: Enables direct file uploads within the chat interface, creating a temporary, in-memory vectorstore for context-aware chat interactions.
 -   **AI Control Testing**: Facilitates uploading YAML configuration files to run and assess AI control tests, with results display and export options.
--   **Regulatory Testing**: Offers two comparison modes:
-    -   **Regulation Comparison**: Compares multiple regulation documents.
-    -   **RCM Comparison**: Assesses compliance by comparing regulation files with an RCM document. Results can be exported.
+-   **Regulatory Testing**: Offers two comparison modes with full API integration:
+    -   **Regulation Comparison**: Compares multiple regulation documents via `POST /compare-regulations` API endpoint. Displays structured results including document frameworks, extracted controls, stringency analysis, and final reports.
+    -   **RCM Comparison**: Assesses compliance by comparing regulation files with an RCM document.
+    -   Results are displayed in a tabbed interface (Summary, Frameworks, Controls, Report) and can be exported as JSON or Markdown.
 -   **Chat Functionality**: Provides real-time AI chat with file upload support, context-aware responses leveraging multiple vectorstores, and robust state persistence across navigation.
 
 ### Technical Implementations
