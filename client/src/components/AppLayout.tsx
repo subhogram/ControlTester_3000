@@ -16,10 +16,10 @@ interface AppLayoutProps {
 }
 
 const tabs = [
-  { title: "Chat", path: "/", icon: MessageSquare },
+  { title: "Regulatory Testing", path: "/regulatory-testing", icon: Scale },
   { title: "AI-Risk Assessment", path: "/evidence-assessment", icon: FileSearch },
   { title: "AI Control Testing", path: "/control-testing", icon: TestTube },
-  { title: "Regulatory Testing", path: "/regulatory-testing", icon: Scale },
+  { title: "Chat", path: "/", icon: MessageSquare },
   { title: "Settings", path: "/settings", icon: Settings },
 ];
 
