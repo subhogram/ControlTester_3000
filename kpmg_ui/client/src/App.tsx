@@ -20,12 +20,11 @@ function Router() {
   return (
     <AppLayout>
       <Switch>
-        <Route path="/" component={ChatPage} />
+        <Route path="/" component={RegulatoryTestingPage} />
         <Route path="/settings" component={SettingsPage} />
         <Route path="/evidence-assessment" component={EvidenceAssessmentPage} />
         <Route path="/control-testing" component={ControlTestingPage} />
-        <Route path="/regulatory-testing" component={RegulatoryTestingPage} />
-        <Route component={NotFound} />
+        <Route path="/chat" component={ChatPage} />
       </Switch>
     </AppLayout>
   );

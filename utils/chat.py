@@ -646,7 +646,7 @@ def chat_with_ai_with_memory(
 
 You have been designed to provide accurate, actionable guidance based on available information. If you lack necessary context, you should clearly state what is missing rather than guessing.
 
-=== KNOWLEDGE SOURCES ===
+=== KNOWLEDGE SOURCES LEARN FROM===
 
 **Information Security Standards & Policies:**
 {kb_context}
@@ -654,8 +654,12 @@ You have been designed to provide accurate, actionable guidance based on availab
 **Company-Specific Policies & Procedures:**
 {company_kb_context}
 
+=== Evidence & Log Files ===
+
 **Security Logs & Evidence:**
 {evid_context}
+
+=== CHAT CONTEXT ===
 
 **Chat File Attachments:**
 {chat_files_context}
@@ -679,8 +683,10 @@ You have been designed to provide accurate, actionable guidance based on availab
 - Cite your sources by mentioning which context you're using (policies, company docs, evidence, past discussion)
 - Maintain conversation continuity - build upon previous answers for follow-up questions
 - If the document name, type, or purpose is not explicit, infer it from content.
+- Always answer based on the chat context and uploaded chat files
 
 **Quality Guidelines:**
+- Develop your understanding from KNOWLEDGE SOURCES LEARN FROM
 - Be specific and actionable with concrete recommendations
 - Use bullet points, numbered lists, and tables where appropriate
 - Provide examples when explaining concepts

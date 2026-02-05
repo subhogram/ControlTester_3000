@@ -24,8 +24,8 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: all                   # Use all available GPUs
-              capabilities: [gpu]          # Request GPU capabilities
+              device_ids: ["0"]     # 👈 PIN TO RTX 3060
+              capabilities: [gpu]     # Request GPU capabilities
     
     # Improved healthcheck with longer startup time for GPU initialization
     healthcheck:
@@ -126,6 +126,7 @@ services:
       - NODE_ENV=production
       - VITE_API_URL=${VITE_API_URL:-http://fastapi_api:8000}
       - OLLAMA_BASE_URL=http://ollama:11434
+      - OLLAMA_NUM_CTX=6144
     depends_on:
       fastapi_api:
         condition: service_started

@@ -17,10 +17,11 @@ from sklearn.metrics.pairwise import cosine_similarity
 # ------------------------------------------------------------------
 # CONFIG
 # ------------------------------------------------------------------
-SIM_THRESHOLD = 0.75  # Lowered slightly for better grouping
-CHUNK_SIZE = 2000     # Increased for better context
-CHUNK_OVERLAP = 400   # Increased overlap
-OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+SIM_THRESHOLD = 0.68  # Lowered slightly for better grouping
+CHUNK_SIZE = 3000     # Increased for better context
+CHUNK_OVERLAP = 600   # Increased overlap
+OLLAMA_BASE_URL = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+OLLAMA_EMBEDDING_MODEL = os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
 
 # Control domain taxonomy - expanded to match analysis
 CONTROL_DOMAINS = {
@@ -94,7 +95,7 @@ class DocumentAnalyzerAgent:
     """Analyzes document structure and regulatory framework."""
     
     def __init__(self, model: str):
-        self.llm = Ollama(model=model, base_url=OLLAMA_URL, temperature=0.1)
+        self.llm = Ollama(model=model, base_url=OLLAMA_BASE_URL, temperature=0.1)
 
     def run(self, chunks: List, filenames: List[str]) -> Dict:
         # Sample chunks from each document
@@ -146,7 +147,7 @@ class ControlExtractorAgent:
     """Extracts risk controls with enhanced metadata."""
     
     def __init__(self, model: str):
-        self.llm = Ollama(model=model, base_url=OLLAMA_URL, temperature=0.1)
+        self.llm = Ollama(model=model, base_url=OLLAMA_BASE_URL, temperature=0.1)
         self.batch_size = 3  # Process multiple chunks together for context
 
     def run(self, chunks: List) -> List[Dict]:
@@ -206,10 +207,10 @@ Return ONLY the JSON array."""
 class StringencyAnalyzerAgent:
     """Enhanced stringency analysis with multiple dimensions."""
     
-    def __init__(self, embed_model="nomic-embed-text"):
+    def __init__(self, embed_model=OLLAMA_EMBEDDING_MODEL):
         self.embedder = OllamaEmbeddings(
             model=embed_model,
-            base_url=OLLAMA_URL
+            base_url=OLLAMA_BASE_URL
         )
 
     def calculate_stringency(self, control: Dict) -> Dict[str, float]:
@@ -481,7 +482,7 @@ class ReportGeneratorAgent:
     """Generates comprehensive comparison report."""
     
     def __init__(self, model: str):
-        self.llm = Ollama(model=model, base_url=OLLAMA_URL, temperature=0.3)
+        self.llm = Ollama(model=model, base_url=OLLAMA_BASE_URL, temperature=0.3)
 
     def run(self, 
             document_analyses: Dict,
