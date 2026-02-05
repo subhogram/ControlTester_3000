@@ -1,6 +1,8 @@
 import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, FileText, X, Play, RotateCcw, Download, Scale, FileCheck, ChevronDown, ChevronRight, AlertCircle, CheckCircle2 } from "lucide-react";
+import { Upload, FileText, X, Play, RotateCcw, Download, Scale, FileCheck, ChevronRight, AlertCircle, CheckCircle2 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -652,9 +654,26 @@ export default function RegulatoryTestingPage() {
                     </CardHeader>
                     <CardContent>
                       {comparisonResults.final_report ? (
-                        <ScrollArea className="h-[500px]">
-                          <div className="prose prose-sm dark:prose-invert max-w-none whitespace-pre-wrap">
-                            {comparisonResults.final_report}
+                        <ScrollArea className="h-[600px]">
+                          <div className="prose prose-sm dark:prose-invert max-w-none pr-4
+                            prose-headings:text-foreground prose-headings:font-semibold
+                            prose-h1:text-2xl prose-h1:border-b prose-h1:border-border prose-h1:pb-2 prose-h1:mb-4
+                            prose-h2:text-xl prose-h2:mt-6 prose-h2:mb-3
+                            prose-h3:text-lg prose-h3:mt-4 prose-h3:mb-2
+                            prose-p:text-muted-foreground prose-p:leading-relaxed
+                            prose-strong:text-foreground prose-strong:font-semibold
+                            prose-ul:my-2 prose-li:text-muted-foreground prose-li:my-1
+                            prose-table:border-collapse prose-table:w-full prose-table:my-4
+                            prose-th:border prose-th:border-border prose-th:bg-muted/50 prose-th:px-3 prose-th:py-2 prose-th:text-left prose-th:font-medium prose-th:text-foreground
+                            prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-td:text-muted-foreground
+                            prose-tr:even:bg-muted/30
+                            prose-a:text-primary prose-a:no-underline hover:prose-a:underline
+                            prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:font-mono
+                            prose-blockquote:border-l-4 prose-blockquote:border-primary prose-blockquote:pl-4 prose-blockquote:italic prose-blockquote:text-muted-foreground
+                            prose-hr:border-border prose-hr:my-6">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {comparisonResults.final_report}
+                            </ReactMarkdown>
                           </div>
                         </ScrollArea>
                       ) : (
