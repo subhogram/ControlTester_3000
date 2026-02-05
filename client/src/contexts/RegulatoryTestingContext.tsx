@@ -81,6 +81,13 @@ export interface ComparisonResultsData {
   error?: string;
 }
 
+interface ModeState {
+  regulationFiles: File[];
+  rcmFile: File | null;
+  isProcessing: boolean;
+  comparisonResults: ComparisonResultsData | null;
+}
+
 interface RegulatoryTestingState {
   mode: ComparisonMode;
   setMode: (mode: ComparisonMode) => void;
@@ -98,26 +105,50 @@ interface RegulatoryTestingState {
 
 const RegulatoryTestingContext = createContext<RegulatoryTestingState | undefined>(undefined);
 
+const initialModeState: ModeState = {
+  regulationFiles: [],
+  rcmFile: null,
+  isProcessing: false,
+  comparisonResults: null,
+};
+
 export function RegulatoryTestingProvider({ children }: { children: ReactNode }) {
-  const [mode, setMode] = useState<ComparisonMode>("regulation");
-  const [regulationFiles, setRegulationFiles] = useState<File[]>([]);
-  const [rcmFile, setRcmFile] = useState<File | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [comparisonResults, setComparisonResults] = useState<ComparisonResultsData | null>(null);
+  const [mode, setModeInternal] = useState<ComparisonMode>("regulation");
+  
+  const [regulationModeState, setRegulationModeState] = useState<ModeState>({ ...initialModeState });
+  const [rcmModeState, setRcmModeState] = useState<ModeState>({ ...initialModeState });
+
+  const currentState = mode === "regulation" ? regulationModeState : rcmModeState;
+  const setCurrentState = mode === "regulation" ? setRegulationModeState : setRcmModeState;
+
+  const setMode = (newMode: ComparisonMode) => {
+    setModeInternal(newMode);
+  };
+
+  const setRegulationFiles = (files: File[]) => {
+    setCurrentState(prev => ({ ...prev, regulationFiles: files }));
+  };
+
+  const setRcmFile = (file: File | null) => {
+    setCurrentState(prev => ({ ...prev, rcmFile: file }));
+  };
+
+  const setIsProcessing = (processing: boolean) => {
+    setCurrentState(prev => ({ ...prev, isProcessing: processing }));
+  };
+
+  const setComparisonResults = (results: ComparisonResultsData | null) => {
+    setCurrentState(prev => ({ ...prev, comparisonResults: results }));
+  };
 
   const resetState = () => {
-    setMode("regulation");
-    setRegulationFiles([]);
-    setRcmFile(null);
-    setIsProcessing(false);
-    setComparisonResults(null);
+    setModeInternal("regulation");
+    setRegulationModeState({ ...initialModeState });
+    setRcmModeState({ ...initialModeState });
   };
 
   const resetForNewComparison = () => {
-    setRegulationFiles([]);
-    setRcmFile(null);
-    setIsProcessing(false);
-    setComparisonResults(null);
+    setCurrentState({ ...initialModeState });
   };
 
   return (
@@ -125,13 +156,13 @@ export function RegulatoryTestingProvider({ children }: { children: ReactNode })
       value={{
         mode,
         setMode,
-        regulationFiles,
+        regulationFiles: currentState.regulationFiles,
         setRegulationFiles,
-        rcmFile,
+        rcmFile: currentState.rcmFile,
         setRcmFile,
-        isProcessing,
+        isProcessing: currentState.isProcessing,
         setIsProcessing,
-        comparisonResults,
+        comparisonResults: currentState.comparisonResults,
         setComparisonResults,
         resetState,
         resetForNewComparison,
