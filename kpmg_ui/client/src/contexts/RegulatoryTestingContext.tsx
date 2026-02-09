@@ -79,6 +79,11 @@ export interface ComparisonResultsData {
   };
   artifacts_location?: string;
   error?: string;
+  filenames?: string[];
+  analysis?: Record<string, unknown>;
+  suggestions_summary_counts?: Record<string, number>;
+  executive_summary?: string;
+  domain_reports?: Record<string, string>;
 }
 
 interface ModeState {
@@ -93,6 +98,7 @@ interface RegulatoryTestingState {
   setMode: (mode: ComparisonMode) => void;
   regulationFiles: File[];
   setRegulationFiles: (files: File[]) => void;
+  addRegulationFiles: (files: File[]) => void;
   rcmFile: File | null;
   setRcmFile: (file: File | null) => void;
   isProcessing: boolean;
@@ -129,6 +135,10 @@ export function RegulatoryTestingProvider({ children }: { children: ReactNode })
     setCurrentState(prev => ({ ...prev, regulationFiles: files }));
   };
 
+  const addRegulationFiles = (newFiles: File[]) => {
+    setCurrentState(prev => ({ ...prev, regulationFiles: [...prev.regulationFiles, ...newFiles] }));
+  };
+
   const setRcmFile = (file: File | null) => {
     setCurrentState(prev => ({ ...prev, rcmFile: file }));
   };
@@ -158,6 +168,7 @@ export function RegulatoryTestingProvider({ children }: { children: ReactNode })
         setMode,
         regulationFiles: currentState.regulationFiles,
         setRegulationFiles,
+        addRegulationFiles,
         rcmFile: currentState.rcmFile,
         setRcmFile,
         isProcessing: currentState.isProcessing,

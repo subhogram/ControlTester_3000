@@ -19,6 +19,7 @@ export default function RegulatoryTestingPage() {
     setMode,
     regulationFiles,
     setRegulationFiles,
+    addRegulationFiles,
     rcmFile,
     setRcmFile,
     isProcessing,
@@ -31,14 +32,14 @@ export default function RegulatoryTestingPage() {
   const onDropRegulations = useCallback(
     (acceptedFiles: File[]) => {
       if (acceptedFiles.length > 0) {
-        setRegulationFiles([...regulationFiles, ...acceptedFiles]);
+        addRegulationFiles(acceptedFiles);
         toast({
           title: "Files uploaded",
           description: `${acceptedFiles.length} regulation file(s) added`,
         });
       }
     },
-    [regulationFiles, setRegulationFiles, toast]
+    [addRegulationFiles, toast]
   );
 
   const onDropRcm = useCallback(
@@ -117,19 +118,28 @@ export default function RegulatoryTestingPage() {
 
       const formData = new FormData();
       formData.append("selected_model", selectedModel);
-      formData.append("max_workers", "4");
       formData.append("save_artifacts", "false");
       formData.append("output_format", "json");
 
-      const allFiles = mode === "rcm" && rcmFile 
-        ? [...regulationFiles, rcmFile] 
-        : regulationFiles;
-      
-      allFiles.forEach((file) => {
-        formData.append("regulation_files", file);
-      });
+      let endpoint: string;
 
-      const response = await fetch(`${apiUrl}/compare-regulations`, {
+      if (mode === "rcm") {
+        endpoint = `${apiUrl}/rcm_compliance`;
+        regulationFiles.forEach((file) => {
+          formData.append("regulation_files", file);
+        });
+        if (rcmFile) {
+          formData.append("rcm_file", rcmFile);
+        }
+      } else {
+        endpoint = `${apiUrl}/compare-regulations`;
+        formData.append("max_workers", "4");
+        regulationFiles.forEach((file) => {
+          formData.append("regulation_files", file);
+        });
+      }
+
+      const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
       });
@@ -137,15 +147,22 @@ export default function RegulatoryTestingPage() {
       const result: ComparisonResultsData = await response.json();
 
       if (!response.ok || !result.success) {
-        throw new Error(result.error || "Failed to compare regulations");
+        throw new Error(result.error || `Failed to run ${mode === "regulation" ? "regulatory comparison" : "RCM compliance analysis"}`);
       }
 
       setComparisonResults(result);
 
-      toast({
-        title: "Analysis Complete",
-        description: `${mode === "regulation" ? "Regulatory comparison" : "RCM assessment"} finished successfully. Found ${result.extracted_controls || 0} controls in ${result.control_groups || 0} groups.`,
-      });
+      if (mode === "rcm") {
+        toast({
+          title: "Analysis Complete",
+          description: `RCM compliance analysis finished. ${Object.keys(result.domain_reports || {}).length} domain reports generated.`,
+        });
+      } else {
+        toast({
+          title: "Analysis Complete",
+          description: `Regulatory comparison finished successfully. Found ${result.extracted_controls || 0} controls in ${result.control_groups || 0} groups.`,
+        });
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to run analysis";
       toast({
@@ -184,13 +201,30 @@ export default function RegulatoryTestingPage() {
   };
 
   const handleExportMarkdown = () => {
-    if (!comparisonResults?.final_report) return;
+    let markdownContent = "";
 
-    const blob = new Blob([comparisonResults.final_report], { type: "text/markdown" });
+    if (mode === "rcm") {
+      if (!comparisonResults?.executive_summary && !comparisonResults?.domain_reports) return;
+      const parts: string[] = [];
+      if (comparisonResults.executive_summary) {
+        parts.push("# Executive Summary\n\n" + comparisonResults.executive_summary);
+      }
+      if (comparisonResults.domain_reports) {
+        Object.entries(comparisonResults.domain_reports).forEach(([domain, report]) => {
+          parts.push(`# Domain: ${domain.replace(/_/g, " ")}\n\n${report}`);
+        });
+      }
+      markdownContent = parts.join("\n\n---\n\n");
+    } else {
+      if (!comparisonResults?.final_report) return;
+      markdownContent = comparisonResults.final_report;
+    }
+
+    const blob = new Blob([markdownContent], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = mode === "regulation" ? "regulatory_comparison.md" : "rcm_assessment.md";
+    a.download = mode === "regulation" ? "regulatory_comparison.md" : "rcm_compliance_report.md";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -213,7 +247,6 @@ export default function RegulatoryTestingPage() {
   const handleModeSwitch = (newMode: "regulation" | "rcm") => {
     if (newMode !== mode) {
       setMode(newMode);
-      resetForNewComparison();
     }
   };
 
@@ -432,6 +465,165 @@ export default function RegulatoryTestingPage() {
                   <p className="text-sm text-destructive">{comparisonResults.error || "Unknown error occurred"}</p>
                 </CardContent>
               </Card>
+            ) : mode === "rcm" ? (
+              <Tabs defaultValue="summary" className="w-full">
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="summary" data-testid="tab-rcm-summary">Summary</TabsTrigger>
+                  <TabsTrigger value="executive" data-testid="tab-rcm-executive">Executive Report</TabsTrigger>
+                  <TabsTrigger value="domains" data-testid="tab-rcm-domains">Domain Reports</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="summary" className="space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <CheckCircle2 className="h-5 w-5 text-green-500" />
+                        RCM Compliance Summary
+                      </CardTitle>
+                      <CardDescription>
+                        Request ID: {comparisonResults.request_id} | Model: {comparisonResults.model_used}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                        <div className="p-4 bg-muted/50 rounded-lg text-center">
+                          <p className="text-2xl font-bold text-primary">{comparisonResults.filenames?.length || 0}</p>
+                          <p className="text-sm text-muted-foreground">Files Analyzed</p>
+                        </div>
+                        <div className="p-4 bg-muted/50 rounded-lg text-center">
+                          <p className="text-2xl font-bold text-primary">{Object.keys(comparisonResults.domain_reports || {}).length}</p>
+                          <p className="text-sm text-muted-foreground">Domains Covered</p>
+                        </div>
+                        <div className="p-4 bg-muted/50 rounded-lg text-center">
+                          <p className="text-2xl font-bold text-green-500">
+                            {comparisonResults.success ? "Complete" : "Failed"}
+                          </p>
+                          <p className="text-sm text-muted-foreground">Status</p>
+                        </div>
+                      </div>
+
+                      {comparisonResults.filenames && comparisonResults.filenames.length > 0 && (
+                        <div className="space-y-2">
+                          <h4 className="font-medium">Files Analyzed</h4>
+                          <div className="flex flex-wrap gap-2">
+                            {comparisonResults.filenames.map((name, idx) => (
+                              <Badge key={idx} variant="secondary">{name}</Badge>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {comparisonResults.suggestions_summary_counts && Object.keys(comparisonResults.suggestions_summary_counts).length > 0 && (
+                        <div className="space-y-2">
+                          <h4 className="font-medium">Remediation Suggestions by Domain</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {Object.entries(comparisonResults.suggestions_summary_counts).map(([domain, count]) => (
+                              <div key={domain} className="flex items-center justify-between p-3 border rounded-lg">
+                                <span className="text-sm font-medium capitalize">{domain.replace(/_/g, " ")}</span>
+                                <Badge variant="outline">{count} suggestion{count !== 1 ? "s" : ""}</Badge>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="executive" className="space-y-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Executive Summary</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      {comparisonResults.executive_summary ? (
+                        <ScrollArea className="h-[600px]">
+                          <div className="prose prose-sm dark:prose-invert max-w-none pr-4
+                            prose-headings:text-foreground prose-headings:font-semibold
+                            prose-h1:text-2xl prose-h1:border-b prose-h1:border-border prose-h1:pb-2 prose-h1:mb-4
+                            prose-h2:text-xl prose-h2:mt-6 prose-h2:mb-3
+                            prose-h3:text-lg prose-h3:mt-4 prose-h3:mb-2
+                            prose-p:text-muted-foreground prose-p:leading-relaxed
+                            prose-strong:text-foreground prose-strong:font-semibold
+                            prose-ul:my-2 prose-li:text-muted-foreground prose-li:my-1
+                            prose-ol:my-2
+                            prose-table:border-collapse prose-table:w-full prose-table:my-4
+                            prose-th:border prose-th:border-border prose-th:bg-muted/50 prose-th:px-3 prose-th:py-2 prose-th:text-left prose-th:font-medium prose-th:text-foreground
+                            prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-td:text-muted-foreground
+                            prose-tr:even:bg-muted/30
+                            prose-a:text-primary prose-a:no-underline hover:prose-a:underline
+                            prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:font-mono
+                            prose-blockquote:border-l-4 prose-blockquote:border-primary prose-blockquote:pl-4 prose-blockquote:italic prose-blockquote:text-muted-foreground
+                            prose-hr:border-border prose-hr:my-6">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {comparisonResults.executive_summary}
+                            </ReactMarkdown>
+                          </div>
+                        </ScrollArea>
+                      ) : (
+                        <p className="text-center text-muted-foreground py-8">No executive summary available</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="domains" className="space-y-4">
+                  {comparisonResults.domain_reports && Object.keys(comparisonResults.domain_reports).length > 0 ? (
+                    <ScrollArea className="h-[600px]">
+                      <div className="space-y-4 pr-4">
+                        {Object.entries(comparisonResults.domain_reports).map(([domain, report], idx) => (
+                          <Collapsible key={idx}>
+                            <Card>
+                              <CollapsibleTrigger className="w-full">
+                                <CardHeader className="flex flex-row items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                                    <ChevronRight className="h-4 w-4 shrink-0 transition-transform duration-200" />
+                                    <CardTitle className="text-base capitalize">{domain.replace(/_/g, " ")}</CardTitle>
+                                  </div>
+                                  {comparisonResults.suggestions_summary_counts?.[domain] !== undefined && (
+                                    <Badge variant="secondary" className="shrink-0">
+                                      {comparisonResults.suggestions_summary_counts[domain]} suggestion{comparisonResults.suggestions_summary_counts[domain] !== 1 ? "s" : ""}
+                                    </Badge>
+                                  )}
+                                </CardHeader>
+                              </CollapsibleTrigger>
+                              <CollapsibleContent>
+                                <CardContent className="pt-0">
+                                  <div className="prose prose-sm dark:prose-invert max-w-none
+                                    prose-headings:text-foreground prose-headings:font-semibold
+                                    prose-h1:text-xl prose-h1:mt-4 prose-h1:mb-3
+                                    prose-h2:text-lg prose-h2:mt-4 prose-h2:mb-2
+                                    prose-h3:text-base prose-h3:mt-3 prose-h3:mb-1
+                                    prose-p:text-muted-foreground prose-p:leading-relaxed
+                                    prose-strong:text-foreground prose-strong:font-semibold
+                                    prose-ul:my-2 prose-li:text-muted-foreground prose-li:my-1
+                                    prose-ol:my-2
+                                    prose-table:border-collapse prose-table:w-full prose-table:my-4
+                                    prose-th:border prose-th:border-border prose-th:bg-muted/50 prose-th:px-3 prose-th:py-2 prose-th:text-left prose-th:font-medium prose-th:text-foreground
+                                    prose-td:border prose-td:border-border prose-td:px-3 prose-td:py-2 prose-td:text-muted-foreground
+                                    prose-tr:even:bg-muted/30
+                                    prose-code:bg-muted prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:font-mono
+                                    prose-blockquote:border-l-4 prose-blockquote:border-primary prose-blockquote:pl-4 prose-blockquote:italic prose-blockquote:text-muted-foreground">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                      {report}
+                                    </ReactMarkdown>
+                                  </div>
+                                </CardContent>
+                              </CollapsibleContent>
+                            </Card>
+                          </Collapsible>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  ) : (
+                    <Card>
+                      <CardContent className="py-8 text-center text-muted-foreground">
+                        No domain reports available
+                      </CardContent>
+                    </Card>
+                  )}
+                </TabsContent>
+              </Tabs>
             ) : (
               <Tabs defaultValue="summary" className="w-full">
                 <TabsList className="grid w-full grid-cols-4">
@@ -693,7 +885,7 @@ export default function RegulatoryTestingPage() {
                 <Download className="h-4 w-4 mr-2" />
                 Export JSON
               </Button>
-              {comparisonResults.final_report && (
+              {(comparisonResults.final_report || comparisonResults.executive_summary || comparisonResults.domain_reports) && (
                 <Button
                   variant="secondary"
                   onClick={handleExportMarkdown}
