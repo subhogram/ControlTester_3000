@@ -1,0 +1,134 @@
+@app.post(
+    "/rcm_compliance",
+    tags=["analysis"],
+    summary="Analyze organization's RCM against regulatory/policy documents and generate compliance report"
+)
+async def rcm_compliance(
+    selected_model: str = Form(..., description="LLM model to use (e.g., llama3:13b)"),
+    regulation_files: List[UploadFile] = File(..., description="Regulatory, policy and guideline documents (min 1)"),
+    rcm_file: UploadFile = File(..., description="Organization Risk Control Matrix (single file)"),
+    save_artifacts: bool = Form(False, description="Save detailed artifacts to disk"),
+    output_format: str = Form("json", description="Response format: json or markdown")
+):
+    rid = _req_id()
+    logger.info(f"[{rid}] RCM compliance request - Model: {selected_model}")
+
+    if not regulation_files or len(regulation_files) < 1:
+        raise HTTPException(status_code=400, detail="At least one regulatory/policy document is required")
+
+    tmp_paths = []
+    filenames = []
+    try:
+        # Save regulation files
+        for uf in regulation_files:
+            ext = Path(uf.filename).suffix or ".tmp"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            content = await uf.read()
+            if len(content) == 0:
+                raise HTTPException(status_code=400, detail=f"Empty file: {uf.filename}")
+            tmp.write(content)
+            tmp.close()
+            tmp_paths.append(tmp.name)
+            filenames.append(uf.filename)
+            logger.info(f"[{rid}] Uploaded regulation: {uf.filename} ({len(content)} bytes)")
+
+        # Save RCM file
+        ext = Path(rcm_file.filename).suffix or ".tmp"
+        tmp_rcm = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+        rcm_content = await rcm_file.read()
+        if len(rcm_content) == 0:
+            raise HTTPException(status_code=400, detail=f"Empty RCM file: {rcm_file.filename}")
+        tmp_rcm.write(rcm_content)
+        tmp_rcm.close()
+        tmp_paths.append(tmp_rcm.name)
+        filenames.append(rcm_file.filename)
+        logger.info(f"[{rid}] Uploaded RCM: {rcm_file.filename} ({len(rcm_content)} bytes)")
+
+        # Load and chunk documents
+        splitter = get_text_splitter()
+        reg_docs = []
+        for p, name in zip(tmp_paths[:-1], filenames[:-1]):
+            docs = load_document(p, name)
+            reg_docs.extend(docs)
+
+        rcm_docs = load_document(tmp_rcm.name, rcm_file.filename)
+
+        reg_chunks = splitter.split_documents(reg_docs) if reg_docs else []
+        rcm_chunks = splitter.split_documents(rcm_docs) if rcm_docs else []
+
+        if not reg_chunks:
+            raise HTTPException(status_code=400, detail="No text extracted from regulatory documents")
+        if not rcm_chunks:
+            raise HTTPException(status_code=400, detail="No text extracted from RCM file")
+
+        # Extract requirements and controls
+        req_extractor = RegulatoryRequirementExtractor(selected_model)
+        requirements = req_extractor.run(reg_chunks)
+
+        rcm_extractor = RCMControlExtractor(selected_model)
+        controls = rcm_extractor.run(rcm_chunks)
+
+        # Analyze compliance
+        analyzer = ComplianceAnalyzer(selected_model)
+        analysis = analyzer.analyze_compliance(requirements, controls)
+
+        # Generate remediation suggestions
+        suggester = RemediationSuggester(selected_model)
+        suggestions = suggester.generate_suggestions(analysis.get("gaps", []), analysis.get("domain_analyses", {}))
+
+        # Generate reports
+        reporter = ComplianceReportGenerator(selected_model)
+        executive_summary = reporter.generate_executive_summary(analysis, suggestions)
+
+        domain_reports = {}
+        for domain, domain_analysis in analysis.get("domain_analyses", {}).items():
+            domain_suggestions = suggestions.get(domain, [])
+            domain_reports[domain] = reporter.generate_domain_report(domain, domain_analysis, domain_suggestions)
+
+        result = {
+            "success": True,
+            "request_id": rid,
+            "model_used": selected_model,
+            "filenames": filenames,
+            "analysis": analysis,
+            "suggestions_summary_counts": {k: len(v) for k, v in suggestions.items()},
+            "executive_summary": executive_summary,
+            "domain_reports": domain_reports
+        }
+
+        # Save artifacts if requested
+        if save_artifacts:
+            output_dir = f"./rcm_analysis_output/{rid}"
+            os.makedirs(output_dir, exist_ok=True)
+            # Save raw analysis and suggestions
+            with open(os.path.join(output_dir, "analysis.json"), "w") as fh:
+                json_str = str(result.get("analysis"))
+                fh.write(json_str)
+            with open(os.path.join(output_dir, "suggestions.json"), "w") as fh:
+                fh.write(str(suggestions))
+            result["artifacts_location"] = output_dir
+            logger.info(f"[{rid}] Artifacts saved to {output_dir}")
+
+        # Return based on output_format
+        if output_format.lower() == "markdown":
+            # Return executive summary and domain reports concatenated
+            md_report = {
+                "executive_summary_md": executive_summary,
+                "domain_reports_md": domain_reports
+            }
+            return JSONResponse({"success": True, "request_id": rid, **md_report})
+
+        return JSONResponse(result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[{rid}] RCM compliance failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail={"error": str(e), "request_id": rid})
+    finally:
+        for p in tmp_paths:
+            try:
+                os.unlink(p)
+            except Exception:
+                pass

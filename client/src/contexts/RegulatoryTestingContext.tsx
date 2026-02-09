@@ -79,6 +79,11 @@ export interface ComparisonResultsData {
   };
   artifacts_location?: string;
   error?: string;
+  filenames?: string[];
+  analysis?: Record<string, unknown>;
+  suggestions_summary_counts?: Record<string, number>;
+  executive_summary?: string;
+  domain_reports?: Record<string, string>;
 }
 
 interface ModeState {

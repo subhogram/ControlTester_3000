@@ -117,19 +117,28 @@ export default function RegulatoryTestingPage() {
 
       const formData = new FormData();
       formData.append("selected_model", selectedModel);
-      formData.append("max_workers", "4");
       formData.append("save_artifacts", "false");
       formData.append("output_format", "json");
 
-      const allFiles = mode === "rcm" && rcmFile 
-        ? [...regulationFiles, rcmFile] 
-        : regulationFiles;
-      
-      allFiles.forEach((file) => {
-        formData.append("regulation_files", file);
-      });
+      let endpoint: string;
 
-      const response = await fetch(`${apiUrl}/compare-regulations`, {
+      if (mode === "rcm") {
+        endpoint = `${apiUrl}/rcm_compliance`;
+        regulationFiles.forEach((file) => {
+          formData.append("regulation_files", file);
+        });
+        if (rcmFile) {
+          formData.append("rcm_file", rcmFile);
+        }
+      } else {
+        endpoint = `${apiUrl}/compare-regulations`;
+        formData.append("max_workers", "4");
+        regulationFiles.forEach((file) => {
+          formData.append("regulation_files", file);
+        });
+      }
+
+      const response = await fetch(endpoint, {
         method: "POST",
         body: formData,
       });
@@ -137,15 +146,22 @@ export default function RegulatoryTestingPage() {
       const result: ComparisonResultsData = await response.json();
 
       if (!response.ok || !result.success) {
-        throw new Error(result.error || "Failed to compare regulations");
+        throw new Error(result.error || `Failed to run ${mode === "regulation" ? "regulatory comparison" : "RCM compliance analysis"}`);
       }
 
       setComparisonResults(result);
 
-      toast({
-        title: "Analysis Complete",
-        description: `${mode === "regulation" ? "Regulatory comparison" : "RCM assessment"} finished successfully. Found ${result.extracted_controls || 0} controls in ${result.control_groups || 0} groups.`,
-      });
+      if (mode === "rcm") {
+        toast({
+          title: "Analysis Complete",
+          description: `RCM compliance analysis finished. ${Object.keys(result.domain_reports || {}).length} domain reports generated.`,
+        });
+      } else {
+        toast({
+          title: "Analysis Complete",
+          description: `Regulatory comparison finished successfully. Found ${result.extracted_controls || 0} controls in ${result.control_groups || 0} groups.`,
+        });
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Failed to run analysis";
       toast({
