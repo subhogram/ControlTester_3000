@@ -19,6 +19,7 @@ export default function RegulatoryTestingPage() {
     setMode,
     regulationFiles,
     setRegulationFiles,
+    addRegulationFiles,
     rcmFile,
     setRcmFile,
     isProcessing,
@@ -31,14 +32,14 @@ export default function RegulatoryTestingPage() {
   const onDropRegulations = useCallback(
     (acceptedFiles: File[]) => {
       if (acceptedFiles.length > 0) {
-        setRegulationFiles([...regulationFiles, ...acceptedFiles]);
+        addRegulationFiles(acceptedFiles);
         toast({
           title: "Files uploaded",
           description: `${acceptedFiles.length} regulation file(s) added`,
         });
       }
     },
-    [regulationFiles, setRegulationFiles, toast]
+    [addRegulationFiles, toast]
   );
 
   const onDropRcm = useCallback(
