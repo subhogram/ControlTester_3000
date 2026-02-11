@@ -1,20 +1,22 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useDropzone } from "react-dropzone";
 import {
   Upload, FileText, X, Play, RotateCcw, Download, CheckCircle2,
-  AlertCircle, Clock, ChevronRight, FileWarning, Shield, Loader2
+  AlertCircle, Clock, ChevronRight, ChevronLeft, FileWarning, Shield, Loader2
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useControlTesting } from "@/contexts/ControlTestingContext";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
+const CHECKLIST_PAGE_SIZE = 5;
+
 export default function ControlTestingPage() {
   const { toast } = useToast();
+  const [checklistPage, setChecklistPage] = useState(0);
   const {
     sessionId,
     currentStep,
@@ -263,6 +265,7 @@ export default function ControlTestingPage() {
 
   const handleNewAudit = () => {
     resetState();
+    setChecklistPage(0);
     toast({ title: "Reset", description: "Ready for new audit" });
   };
 
@@ -432,9 +435,10 @@ export default function ControlTestingPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="max-h-64">
-                  <div className="space-y-2">
-                    {evidenceChecklist.map((item, index) => {
+                <div className="space-y-2">
+                  {evidenceChecklist
+                    .slice(checklistPage * CHECKLIST_PAGE_SIZE, (checklistPage + 1) * CHECKLIST_PAGE_SIZE)
+                    .map((item, index) => {
                       const isSatisfied = filesProcessed.some(
                         (fp) => fp.validation_status === "accepted" && fp.satisfies_controls?.includes(item.control_id)
                       );
@@ -442,7 +446,7 @@ export default function ControlTestingPage() {
                         <div
                           key={item.control_id}
                           className="flex items-start gap-3 p-3 rounded-lg bg-muted/30"
-                          data-testid={`checklist-item-${index}`}
+                          data-testid={`checklist-item-${checklistPage * CHECKLIST_PAGE_SIZE + index}`}
                         >
                           <div className="mt-0.5">
                             {isSatisfied ? (
@@ -470,8 +474,37 @@ export default function ControlTestingPage() {
                         </div>
                       );
                     })}
+                </div>
+                {evidenceChecklist.length > CHECKLIST_PAGE_SIZE && (
+                  <div className="flex items-center justify-between mt-4 pt-3 border-t">
+                    <p className="text-sm text-muted-foreground">
+                      Showing {checklistPage * CHECKLIST_PAGE_SIZE + 1}–{Math.min((checklistPage + 1) * CHECKLIST_PAGE_SIZE, evidenceChecklist.length)} of {evidenceChecklist.length}
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        disabled={checklistPage === 0}
+                        onClick={() => setChecklistPage((p) => p - 1)}
+                        data-testid="button-checklist-prev"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="text-sm px-2 text-muted-foreground">
+                        {checklistPage + 1} / {Math.ceil(evidenceChecklist.length / CHECKLIST_PAGE_SIZE)}
+                      </span>
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        disabled={(checklistPage + 1) * CHECKLIST_PAGE_SIZE >= evidenceChecklist.length}
+                        onClick={() => setChecklistPage((p) => p + 1)}
+                        data-testid="button-checklist-next"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                </ScrollArea>
+                )}
               </CardContent>
             </Card>
 
