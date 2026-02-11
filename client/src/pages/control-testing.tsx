@@ -45,15 +45,6 @@ export default function ControlTestingPage() {
     (acceptedFiles: File[]) => {
       if (acceptedFiles.length > 0) {
         const file = acceptedFiles[0];
-        const isYaml = file.name.endsWith(".yaml") || file.name.endsWith(".yml");
-        if (!isYaml) {
-          toast({
-            title: "Invalid file type",
-            description: "Only YAML files (.yaml, .yml) are accepted for test scripts",
-            variant: "destructive",
-          });
-          return;
-        }
         setTestScriptFile(file);
         toast({
           title: "Script uploaded",
@@ -81,7 +72,17 @@ export default function ControlTestingPage() {
     useDropzone({
       onDrop: onDropScript,
       multiple: false,
-      accept: { "application/x-yaml": [".yaml", ".yml"], "text/yaml": [".yaml", ".yml"] },
+      accept: {
+        "application/pdf": [".pdf"],
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+        "application/vnd.ms-excel": [".xls"],
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+        "application/msword": [".doc"],
+        "application/x-yaml": [".yaml", ".yml"],
+        "text/yaml": [".yaml", ".yml"],
+        "text/csv": [".csv"],
+        "text/plain": [".txt"],
+      },
     });
 
   const { getRootProps: getEvidenceRootProps, getInputProps: getEvidenceInputProps, isDragActive: isEvidenceDragActive } =
@@ -353,7 +354,7 @@ export default function ControlTestingPage() {
                       Drag & drop your test script here
                     </p>
                     <p className="text-muted-foreground text-sm mt-1">
-                      or click to browse (.yaml, .yml)
+                      or click to browse (.pdf, .xlsx, .xls, .docx, .doc, .yaml, .csv, .txt)
                     </p>
                   </>
                 )}
