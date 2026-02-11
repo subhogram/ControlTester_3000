@@ -25,7 +25,10 @@ The backend is an Express.js application written in TypeScript. It handles file 
     -   **General Context (Global Knowledge Base)**: Allows uploading files to build a global knowledge base, which is automatically saved and loaded.
     -   **Company Policy Context**: Supports uploading company-specific policy documents to create a dedicated knowledge base, also with automatic saving and loading.
     -   **Chat Attachments**: Enables direct file uploads within the chat interface, creating a temporary, in-memory vectorstore for context-aware chat interactions.
--   **AI Control Testing**: Facilitates uploading YAML configuration files to run and assess AI control tests, with results display and export options.
+-   **AI Control Testing**: Multi-step audit workflow integrated with external API:
+    -   **Step 1 - Upload Script**: Upload a YAML control test script via `POST /audit/start`. The API parses it and returns an evidence checklist with required files per control.
+    -   **Step 2 - Provide Evidence**: Upload evidence files via `POST /audit/upload-evidence`. The API validates each file against the test script requirements (flags discrepancies like wrong file types).
+    -   **Step 3 - Generate Workpaper**: Generate a pre-filled audit workpaper via `POST /audit/generate-workpaper`. Analysis uses 2 pre-built FAISS vectorstores (global + company). Download the resulting Excel workpaper via `GET /audit/download/{session_id}/{filename}`.
 -   **Regulatory Testing**: Offers two comparison modes with full API integration:
     -   **Regulation Comparison**: Compares multiple regulation documents via `POST /compare-regulations` API endpoint. Displays structured results including document frameworks, extracted controls, stringency analysis, and final reports.
     -   **RCM Comparison**: Assesses compliance by comparing regulation files with an RCM document.

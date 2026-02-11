@@ -1,113 +1,274 @@
 import { useCallback } from "react";
 import { useDropzone } from "react-dropzone";
-import { Upload, FileText, X, Play, RotateCcw } from "lucide-react";
+import {
+  Upload, FileText, X, Play, RotateCcw, Download, CheckCircle2,
+  AlertCircle, Clock, ChevronRight, FileWarning, Shield, Loader2
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useControlTesting } from "@/contexts/ControlTestingContext";
+import { ScrollArea } from "@/components/ui/scroll-area";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function ControlTestingPage() {
   const { toast } = useToast();
   const {
-    uploadedFiles,
-    setUploadedFiles,
+    sessionId,
+    currentStep,
+    testScriptFile,
+    controlsFound,
+    evidenceChecklist,
+    warnings,
+    evidenceFiles,
+    filesProcessed,
+    evidenceSummary,
+    appendFilesProcessed,
+    pendingControls,
+    readyToGenerate,
     isProcessing,
-    setIsProcessing,
-    testResults,
-    setTestResults,
+    workpaperFilename,
+    downloadUrl,
+    workpaperSummary,
+    resultMessage,
+    error,
+    setTestScriptFile,
+    setSessionData,
+    addEvidenceFiles,
+    setEvidenceFiles,
     resetState,
   } = useControlTesting();
 
-  const onDrop = useCallback(
+  const onDropScript = useCallback(
     (acceptedFiles: File[]) => {
-      const yamlFiles = acceptedFiles.filter(
-        (file) =>
-          file.name.endsWith(".yaml") ||
-          file.name.endsWith(".yml") ||
-          file.type === "application/x-yaml" ||
-          file.type === "text/yaml"
-      );
-
-      if (yamlFiles.length !== acceptedFiles.length) {
+      if (acceptedFiles.length > 0) {
+        const file = acceptedFiles[0];
+        const isYaml = file.name.endsWith(".yaml") || file.name.endsWith(".yml");
+        if (!isYaml) {
+          toast({
+            title: "Invalid file type",
+            description: "Only YAML files (.yaml, .yml) are accepted for test scripts",
+            variant: "destructive",
+          });
+          return;
+        }
+        setTestScriptFile(file);
         toast({
-          title: "Invalid file type",
-          description: "Only YAML files (.yaml, .yml) are accepted",
-          variant: "destructive",
-        });
-      }
-
-      if (yamlFiles.length > 0) {
-        setUploadedFiles([...uploadedFiles, ...yamlFiles]);
-        toast({
-          title: "Files uploaded",
-          description: `${yamlFiles.length} YAML file(s) added`,
+          title: "Script uploaded",
+          description: `${file.name} ready for parsing`,
         });
       }
     },
-    [uploadedFiles, setUploadedFiles, toast]
+    [setTestScriptFile, toast]
   );
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    onDrop,
-    accept: {
-      "application/x-yaml": [".yaml", ".yml"],
-      "text/yaml": [".yaml", ".yml"],
+  const onDropEvidence = useCallback(
+    (acceptedFiles: File[]) => {
+      if (acceptedFiles.length > 0) {
+        addEvidenceFiles(acceptedFiles);
+        toast({
+          title: "Evidence files added",
+          description: `${acceptedFiles.length} file(s) added`,
+        });
+      }
     },
-    multiple: true,
-  });
+    [addEvidenceFiles, toast]
+  );
 
-  const removeFile = (index: number) => {
-    setUploadedFiles(uploadedFiles.filter((_, i) => i !== index));
+  const { getRootProps: getScriptRootProps, getInputProps: getScriptInputProps, isDragActive: isScriptDragActive } =
+    useDropzone({
+      onDrop: onDropScript,
+      multiple: false,
+      accept: { "application/x-yaml": [".yaml", ".yml"], "text/yaml": [".yaml", ".yml"] },
+    });
+
+  const { getRootProps: getEvidenceRootProps, getInputProps: getEvidenceInputProps, isDragActive: isEvidenceDragActive } =
+    useDropzone({
+      onDrop: onDropEvidence,
+      multiple: true,
+    });
+
+  const removeEvidenceFile = (index: number) => {
+    setEvidenceFiles(evidenceFiles.filter((_, i) => i !== index));
   };
 
-  const handleRunTests = async () => {
-    if (uploadedFiles.length === 0) {
-      toast({
-        title: "No files",
-        description: "Please upload YAML files to run tests",
-        variant: "destructive",
-      });
+  const handleStartAudit = async () => {
+    if (!testScriptFile) {
+      toast({ title: "No file", description: "Please upload a test script", variant: "destructive" });
       return;
     }
 
-    setIsProcessing(true);
-    setTestResults(null);
+    const selectedModel = localStorage.getItem("selectedModel") || "llama3";
+    setSessionData({ isProcessing: true, error: null });
 
     try {
-      toast({
-        title: "Processing",
-        description: "Running AI control tests...",
+      const formData = new FormData();
+      formData.append("selected_model", selectedModel);
+      formData.append("test_script", testScriptFile);
+
+      const response = await fetch(`${API_URL}/audit/start`, {
+        method: "POST",
+        body: formData,
       });
 
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(errData.error || errData.detail || `Server error: ${response.status}`);
+      }
 
-      setTestResults(
-        "Control testing completed successfully. Results will be displayed here once the API integration is complete."
-      );
+      const data = await response.json();
+
+      setSessionData({
+        sessionId: data.session_id,
+        currentStep: "review_checklist",
+        controlsFound: data.controls_found,
+        evidenceChecklist: data.evidence_checklist || [],
+        warnings: data.warnings || [],
+        isProcessing: false,
+      });
 
       toast({
-        title: "Tests Complete",
-        description: "AI control testing finished successfully",
+        title: "Test Script Parsed",
+        description: `${data.controls_found} controls found. Please upload evidence files.`,
       });
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to run control tests",
-        variant: "destructive",
-      });
-    } finally {
-      setIsProcessing(false);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to start audit";
+      setSessionData({ isProcessing: false, error: message });
+      toast({ title: "Error", description: message, variant: "destructive" });
     }
   };
 
-  const handleNewTest = () => {
-    resetState();
-    toast({
-      title: "Reset",
-      description: "Ready for new control testing",
-    });
+  const handleUploadEvidence = async () => {
+    if (evidenceFiles.length === 0) {
+      toast({ title: "No files", description: "Please upload evidence files", variant: "destructive" });
+      return;
+    }
+    if (!sessionId) return;
+
+    setSessionData({ isProcessing: true, error: null });
+
+    try {
+      const formData = new FormData();
+      formData.append("session_id", sessionId);
+      evidenceFiles.forEach((file) => {
+        formData.append("evidence_files", file);
+      });
+
+      const response = await fetch(`${API_URL}/audit/upload-evidence`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(errData.error || errData.detail || `Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      appendFilesProcessed(data.files_processed || []);
+      setSessionData({
+        currentStep: "upload_evidence",
+        evidenceSummary: data.evidence_summary || null,
+        pendingControls: data.pending_controls || [],
+        readyToGenerate: data.ready_to_generate || false,
+        isProcessing: false,
+        evidenceFiles: [],
+      });
+
+      const accepted = (data.files_processed || []).filter(
+        (f: { validation_status: string }) => f.validation_status === "accepted"
+      ).length;
+      const rejected = (data.files_processed || []).filter(
+        (f: { validation_status: string }) => f.validation_status === "rejected"
+      ).length;
+
+      toast({
+        title: "Evidence Processed",
+        description: `${accepted} accepted, ${rejected} rejected. ${data.ready_to_generate ? "Ready to generate workpaper." : `${data.evidence_summary?.pending || 0} controls still need evidence.`}`,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to upload evidence";
+      setSessionData({ isProcessing: false, error: message });
+      toast({ title: "Error", description: message, variant: "destructive" });
+    }
   };
+
+  const handleGenerateWorkpaper = async () => {
+    if (!sessionId) return;
+
+    setSessionData({ isProcessing: true, currentStep: "generating", error: null });
+
+    try {
+      const formData = new FormData();
+      formData.append("session_id", sessionId);
+      if (!readyToGenerate) {
+        formData.append("force_generate", "true");
+      }
+
+      const response = await fetch(`${API_URL}/audit/generate-workpaper`, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(errData.error || errData.detail || `Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      setSessionData({
+        currentStep: "results",
+        workpaperFilename: data.workpaper_filename || null,
+        downloadUrl: data.download_url || null,
+        workpaperSummary: data.summary || null,
+        resultMessage: data.message || "Workpaper generated successfully",
+        isProcessing: false,
+      });
+
+      toast({
+        title: "Workpaper Generated",
+        description: data.message || "Audit workpaper is ready for download.",
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to generate workpaper";
+      setSessionData({ isProcessing: false, currentStep: "upload_evidence", error: message });
+      toast({ title: "Error", description: message, variant: "destructive" });
+    }
+  };
+
+  const handleDownloadWorkpaper = async () => {
+    if (!downloadUrl) return;
+    try {
+      const response = await fetch(`${API_URL}${downloadUrl}`);
+      if (!response.ok) throw new Error("Download failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = workpaperFilename || "workpaper.xlsx";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: "Downloaded", description: "Workpaper saved" });
+    } catch {
+      toast({ title: "Error", description: "Failed to download workpaper", variant: "destructive" });
+    }
+  };
+
+  const handleNewAudit = () => {
+    resetState();
+    toast({ title: "Reset", description: "Ready for new audit" });
+  };
+
+  const stepNumber = currentStep === "upload_script" ? 1
+    : currentStep === "review_checklist" || currentStep === "upload_evidence" ? 2
+    : currentStep === "generating" ? 3
+    : 3;
 
   return (
     <div className="h-full overflow-auto p-6">
@@ -117,36 +278,79 @@ export default function ControlTestingPage() {
             AI Control Testing
           </h1>
           <p className="text-muted-foreground mt-2">
-            Upload YAML configuration files to test AI controls
+            Upload a control test script, provide evidence, and generate audit workpapers
           </p>
         </div>
 
-        {!isProcessing && !testResults && (
+        <div className="flex items-center justify-center gap-2 mb-6">
+          {[
+            { num: 1, label: "Upload Script" },
+            { num: 2, label: "Provide Evidence" },
+            { num: 3, label: "Generate Workpaper" },
+          ].map((step, idx) => (
+            <div key={step.num} className="flex items-center gap-2">
+              <div
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  stepNumber === step.num
+                    ? "bg-primary text-primary-foreground"
+                    : stepNumber > step.num
+                    ? "bg-primary/20 text-primary"
+                    : "bg-muted text-muted-foreground"
+                }`}
+                data-testid={`step-indicator-${step.num}`}
+              >
+                {stepNumber > step.num ? (
+                  <CheckCircle2 className="h-4 w-4" />
+                ) : (
+                  <span>{step.num}</span>
+                )}
+                <span className="hidden sm:inline">{step.label}</span>
+              </div>
+              {idx < 2 && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+            </div>
+          ))}
+        </div>
+
+        {error && (
+          <Card className="border-destructive">
+            <CardContent className="py-4">
+              <div className="flex items-center gap-2 text-destructive">
+                <AlertCircle className="h-5 w-5 flex-shrink-0" />
+                <p className="text-sm">{error}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {currentStep === "upload_script" && (
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5" />
                 Upload Control Test Script
               </CardTitle>
+              <CardDescription>
+                Upload a YAML test script that defines the controls to be tested and the evidence requirements
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div
-                {...getRootProps()}
+                {...getScriptRootProps()}
                 className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-                  isDragActive
+                  isScriptDragActive
                     ? "border-primary bg-primary/5"
                     : "border-muted-foreground/25 hover:border-primary/50"
                 }`}
-                data-testid="dropzone-yaml"
+                data-testid="dropzone-script"
               >
-                <input {...getInputProps()} data-testid="input-yaml-files" />
+                <input {...getScriptInputProps()} data-testid="input-script-file" />
                 <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                {isDragActive ? (
-                  <p className="text-primary font-medium">Drop YAML files here...</p>
+                {isScriptDragActive ? (
+                  <p className="text-primary font-medium">Drop test script here...</p>
                 ) : (
                   <>
                     <p className="text-foreground font-medium">
-                      Drag & drop YAML files here
+                      Drag & drop your test script here
                     </p>
                     <p className="text-muted-foreground text-sm mt-1">
                       or click to browse (.yaml, .yml)
@@ -155,92 +359,383 @@ export default function ControlTestingPage() {
                 )}
               </div>
 
-              {uploadedFiles.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">
-                    Uploaded Files ({uploadedFiles.length})
-                  </p>
-                  <div className="space-y-2 max-h-48 overflow-auto">
-                    {uploadedFiles.map((file, index) => (
-                      <div
-                        key={`${file.name}-${index}`}
-                        className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
-                        data-testid={`file-item-${index}`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-primary" />
-                          <span className="text-sm truncate max-w-xs">
-                            {file.name}
-                          </span>
-                          <Badge variant="secondary" className="text-xs">
-                            {(file.size / 1024).toFixed(1)} KB
-                          </Badge>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeFile(index)}
-                          data-testid={`button-remove-file-${index}`}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    ))}
+              {testScriptFile && (
+                <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-4 w-4 text-primary" />
+                    <span className="text-sm truncate max-w-xs">{testScriptFile.name}</span>
+                    <Badge variant="secondary" className="text-xs">
+                      {(testScriptFile.size / 1024).toFixed(1)} KB
+                    </Badge>
                   </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => setTestScriptFile(null)}
+                    data-testid="button-remove-script"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
                 </div>
               )}
 
               <Button
-                onClick={handleRunTests}
-                disabled={uploadedFiles.length === 0}
+                onClick={handleStartAudit}
+                disabled={!testScriptFile || isProcessing}
                 className="w-full"
-                data-testid="button-run-tests"
+                data-testid="button-start-audit"
               >
-                <Play className="h-4 w-4 mr-2" />
-                Run Control Tests
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Parsing Test Script...
+                  </>
+                ) : (
+                  <>
+                    <Play className="h-4 w-4 mr-2" />
+                    Parse Test Script
+                  </>
+                )}
               </Button>
             </CardContent>
           </Card>
         )}
 
-        {isProcessing && (
+        {(currentStep === "review_checklist" || currentStep === "upload_evidence") && (
+          <>
+            {warnings.length > 0 && (
+              <Card className="border-yellow-500/50">
+                <CardContent className="py-4">
+                  <div className="flex items-start gap-2">
+                    <FileWarning className="h-5 w-5 text-yellow-500 flex-shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-yellow-600 dark:text-yellow-400">Warnings</p>
+                      {warnings.map((w, i) => (
+                        <p key={i} className="text-sm text-muted-foreground">{w}</p>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Shield className="h-5 w-5" />
+                  Evidence Checklist
+                  <Badge variant="secondary">{controlsFound} controls</Badge>
+                </CardTitle>
+                <CardDescription>
+                  The test script requires evidence for each control listed below. Upload the appropriate files.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="max-h-64">
+                  <div className="space-y-2">
+                    {evidenceChecklist.map((item, index) => {
+                      const isSatisfied = filesProcessed.some(
+                        (fp) => fp.validation_status === "accepted" && fp.satisfies_controls?.includes(item.control_id)
+                      );
+                      return (
+                        <div
+                          key={item.control_id}
+                          className="flex items-start gap-3 p-3 rounded-lg bg-muted/30"
+                          data-testid={`checklist-item-${index}`}
+                        >
+                          <div className="mt-0.5">
+                            {isSatisfied ? (
+                              <CheckCircle2 className="h-5 w-5 text-green-500" />
+                            ) : (
+                              <Clock className="h-5 w-5 text-muted-foreground" />
+                            )}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge variant="outline" className="text-xs font-mono">
+                                {item.control_id}
+                              </Badge>
+                              <Badge variant={isSatisfied ? "default" : "secondary"} className="text-xs">
+                                {isSatisfied ? "Received" : "Pending"}
+                              </Badge>
+                            </div>
+                            <p className="text-sm mt-1 text-muted-foreground truncate">
+                              {item.control_description}
+                            </p>
+                            <p className="text-xs mt-0.5 text-primary/80">
+                              Required: {item.evidence_required}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+
+            {filesProcessed.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    Validation Results
+                    {evidenceSummary && (
+                      <Badge variant="secondary">
+                        {evidenceSummary.received}/{evidenceSummary.total_controls} received
+                      </Badge>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {filesProcessed.map((fp, index) => (
+                      <div
+                        key={`${fp.filename}-${index}`}
+                        className={`flex items-start gap-3 p-3 rounded-lg ${
+                          fp.validation_status === "accepted"
+                            ? "bg-green-500/10"
+                            : "bg-destructive/10"
+                        }`}
+                        data-testid={`validation-result-${index}`}
+                      >
+                        {fp.validation_status === "accepted" ? (
+                          <CheckCircle2 className="h-5 w-5 text-green-500 flex-shrink-0 mt-0.5" />
+                        ) : (
+                          <AlertCircle className="h-5 w-5 text-destructive flex-shrink-0 mt-0.5" />
+                        )}
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-sm font-medium truncate">{fp.filename}</span>
+                            <Badge
+                              variant={fp.validation_status === "accepted" ? "default" : "destructive"}
+                              className="text-xs"
+                            >
+                              {fp.validation_status}
+                            </Badge>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-1">{fp.reason}</p>
+                          {fp.satisfies_controls && fp.satisfies_controls.length > 0 && (
+                            <div className="flex items-center gap-1 mt-1 flex-wrap">
+                              <span className="text-xs text-muted-foreground">Satisfies:</span>
+                              {fp.satisfies_controls.map((c) => (
+                                <Badge key={c} variant="outline" className="text-xs font-mono">
+                                  {c}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Upload className="h-5 w-5" />
+                  Upload Evidence Files
+                </CardTitle>
+                <CardDescription>
+                  Upload the evidence files required by the test script. The system will validate each file against the checklist.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div
+                  {...getEvidenceRootProps()}
+                  className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                    isEvidenceDragActive
+                      ? "border-primary bg-primary/5"
+                      : "border-muted-foreground/25 hover:border-primary/50"
+                  }`}
+                  data-testid="dropzone-evidence"
+                >
+                  <input {...getEvidenceInputProps()} data-testid="input-evidence-files" />
+                  <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                  {isEvidenceDragActive ? (
+                    <p className="text-primary font-medium">Drop evidence files here...</p>
+                  ) : (
+                    <>
+                      <p className="text-foreground font-medium">
+                        Drag & drop evidence files here
+                      </p>
+                      <p className="text-muted-foreground text-sm mt-1">
+                        or click to browse (PDF, LOG, TXT, CSV, DOCX)
+                      </p>
+                    </>
+                  )}
+                </div>
+
+                {evidenceFiles.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">
+                      Files to Upload ({evidenceFiles.length})
+                    </p>
+                    <div className="space-y-2 max-h-48 overflow-auto">
+                      {evidenceFiles.map((file, index) => (
+                        <div
+                          key={`${file.name}-${index}`}
+                          className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
+                          data-testid={`evidence-file-${index}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-primary" />
+                            <span className="text-sm truncate max-w-xs">{file.name}</span>
+                            <Badge variant="secondary" className="text-xs">
+                              {(file.size / 1024).toFixed(1)} KB
+                            </Badge>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeEvidenceFile(index)}
+                            data-testid={`button-remove-evidence-${index}`}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Button
+                    onClick={handleUploadEvidence}
+                    disabled={evidenceFiles.length === 0 || isProcessing}
+                    data-testid="button-upload-evidence"
+                  >
+                    {isProcessing ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Validating Evidence...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4 mr-2" />
+                        Submit Evidence
+                      </>
+                    )}
+                  </Button>
+
+                  {readyToGenerate && (
+                    <Button
+                      onClick={handleGenerateWorkpaper}
+                      variant="default"
+                      data-testid="button-generate-workpaper"
+                    >
+                      <Play className="h-4 w-4 mr-2" />
+                      Generate Workpaper
+                    </Button>
+                  )}
+
+                  {!readyToGenerate && evidenceSummary && evidenceSummary.received > 0 && (
+                    <Button
+                      onClick={handleGenerateWorkpaper}
+                      variant="secondary"
+                      data-testid="button-force-generate"
+                    >
+                      <Play className="h-4 w-4 mr-2" />
+                      Generate with Partial Evidence
+                    </Button>
+                  )}
+                </div>
+
+                {pendingControls.length > 0 && !readyToGenerate && (
+                  <div className="mt-4 p-3 bg-muted/30 rounded-lg">
+                    <p className="text-sm font-medium mb-2 flex items-center gap-2">
+                      <Clock className="h-4 w-4" />
+                      Still Needed ({pendingControls.length})
+                    </p>
+                    <div className="space-y-1">
+                      {pendingControls.map((pc) => (
+                        <div key={pc.control_id} className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Badge variant="outline" className="text-xs font-mono">{pc.control_id}</Badge>
+                          <span className="truncate">{pc.evidence_required || pc.control_description || ""}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </>
+        )}
+
+        {currentStep === "generating" && (
           <Card>
             <CardContent className="py-12">
               <div className="flex flex-col items-center justify-center space-y-4">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-                <p className="text-lg font-medium">Processing YAML files...</p>
-                <p className="text-sm text-muted-foreground">
-                  Running AI control tests
+                <Loader2 className="h-12 w-12 animate-spin text-primary" />
+                <p className="text-lg font-medium">Generating Audit Workpaper...</p>
+                <p className="text-sm text-muted-foreground text-center max-w-md">
+                  Analyzing evidence against controls using pre-built knowledge bases. This may take a few minutes.
                 </p>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {testResults && (
+        {currentStep === "results" && (
           <>
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5 text-green-500" />
-                  Test Results
+                  <CheckCircle2 className="h-5 w-5 text-green-500" />
+                  Audit Complete
                 </CardTitle>
+                <CardDescription>{resultMessage}</CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="p-4 bg-muted/50 rounded-lg">
-                  <p className="text-sm">{testResults}</p>
-                </div>
+              <CardContent className="space-y-4">
+                {workpaperSummary && (
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div className="p-4 bg-muted/50 rounded-lg text-center">
+                      <p className="text-2xl font-bold">{workpaperSummary.controls_tested}</p>
+                      <p className="text-xs text-muted-foreground mt-1">Controls Tested</p>
+                    </div>
+                    <div className="p-4 bg-green-500/10 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-green-600 dark:text-green-400">{workpaperSummary.pass_count}</p>
+                      <p className="text-xs text-muted-foreground mt-1">Passed</p>
+                    </div>
+                    <div className="p-4 bg-destructive/10 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-destructive">{workpaperSummary.fail_count}</p>
+                      <p className="text-xs text-muted-foreground mt-1">Failed</p>
+                    </div>
+                    <div className="p-4 bg-primary/10 rounded-lg text-center">
+                      <p className="text-2xl font-bold text-primary">
+                        {workpaperSummary.controls_tested > 0
+                          ? Math.round((workpaperSummary.pass_count / workpaperSummary.controls_tested) * 100)
+                          : 0}%
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">Pass Rate</p>
+                    </div>
+                  </div>
+                )}
+
+                {downloadUrl && (
+                  <Button
+                    onClick={handleDownloadWorkpaper}
+                    className="w-full"
+                    data-testid="button-download-workpaper"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    Download Workpaper ({workpaperFilename || "workpaper.xlsx"})
+                  </Button>
+                )}
               </CardContent>
             </Card>
 
             <div className="flex items-center justify-center gap-4">
               <Button
                 variant="outline"
-                onClick={handleNewTest}
-                data-testid="button-new-test"
+                onClick={handleNewAudit}
+                data-testid="button-new-audit"
               >
                 <RotateCcw className="h-4 w-4 mr-2" />
-                New Test
+                New Audit
               </Button>
             </div>
           </>

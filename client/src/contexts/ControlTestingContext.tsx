@@ -64,6 +64,7 @@ interface ControlTestingContextType extends AuditSessionState {
   setSessionData: (data: Partial<AuditSessionState>) => void;
   addEvidenceFiles: (files: File[]) => void;
   setEvidenceFiles: (files: File[]) => void;
+  appendFilesProcessed: (results: FileProcessedResult[]) => void;
   resetState: () => void;
 }
 
@@ -112,6 +113,10 @@ export function ControlTestingProvider({ children }: { children: ReactNode }) {
     setState(prev => ({ ...prev, evidenceFiles: files }));
   };
 
+  const appendFilesProcessed = (results: FileProcessedResult[]) => {
+    setState(prev => ({ ...prev, filesProcessed: [...prev.filesProcessed, ...results] }));
+  };
+
   const resetState = () => {
     setState({ ...initialState });
   };
@@ -125,6 +130,7 @@ export function ControlTestingProvider({ children }: { children: ReactNode }) {
         setSessionData,
         addEvidenceFiles,
         setEvidenceFiles,
+        appendFilesProcessed,
         resetState,
       }}
     >
