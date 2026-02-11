@@ -1,0 +1,1582 @@
+"""
+Complete FastAPI wrapper for ControlTester_3000 with Session & Memory Management
+File: api/main.py
+Includes session management, conversation memory, and enhanced chat capabilities
+Phase 1 + Phase 2 implementation - FIXED VERSION
+"""
+
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse
+from langchain_ollama import OllamaLLM, OllamaEmbeddings
+from langchain_community.vectorstores import FAISS
+from pydantic import BaseModel, Field, validator
+from typing import List, Optional, Dict, Any
+import tempfile
+import os
+import json
+import time
+import logging
+import traceback
+from pathlib import Path
+from utils.file_handlers import save_faiss_vectorstore, load_faiss_vectorstore
+from utils.audit_session_store import audit_session_store
+from utils.test_script_parser import parse_test_script, validate_controls
+from utils.evidence_validator import validate_evidence_file
+from utils.audit_analyzer import analyze_all_controls, generate_overall_summary
+from utils.workpaper_filler import fill_workpaper_template
+
+# utils imports
+from utils.llm_chain import build_knowledge_base, assess_evidence_with_kb, generate_executive_summary
+from utils.find_llm import get_ollama_model_names
+from langchain.schema import Document
+from utils.pdf_generator import generate_workbook
+
+# Add for session management
+from datetime import datetime
+import uuid
+
+from utils.regulatory_comparision import compare_regulatory_documents, save_analysis_artifacts
+from utils.rcm_compliance_analyzer import (
+    load_document,
+    get_text_splitter,
+    RegulatoryRequirementExtractor,
+    RCMControlExtractor,
+    ComplianceAnalyzer,
+    RemediationSuggester,
+    ComplianceReportGenerator,
+)
+
+# ----------------------------------------------------------------------------
+# Logging
+# ----------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("api.log", mode="a")
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class AuditStartResponse(BaseModel):
+    session_id: str
+    status: str
+    controls_found: int
+    evidence_checklist: List[Dict[str, Any]]
+    message: str
+    warnings: Optional[List[str]] = None
+
+class EvidenceUploadResponse(BaseModel):
+    session_id: str
+    status: str
+    files_processed: List[Dict[str, Any]]
+    evidence_summary: Dict[str, int]
+    pending_controls: List[Dict[str, Any]]
+    ready_to_generate: bool
+    message: str
+
+class WorkpaperResponse(BaseModel):
+    session_id: str
+    status: str
+    workpaper_filename: Optional[str]
+    pdf_filename: Optional[str]
+    summary: Dict[str, Any]
+    download_url: Optional[str]
+    message: str
+
+# ----------------------------------------------------------------------------
+# FastAPI instance & CORS
+# ----------------------------------------------------------------------------
+app = FastAPI(
+    title="ControlTester 3000 API",
+    version="2.2.0",
+    description="Cybersecurity audit service with memory management, session handling, and multi-source context integration.",
+    openapi_tags=[
+        {"name": "meta", "description": "API information and health checks"},
+        {"name": "models", "description": "Available language models"},
+        {"name": "knowledge-base", "description": "Knowledge base creation"},
+        {"name": "assessment", "description": "Evidence assessment and audit analysis"},
+        {"name": "chat", "description": "Chat with memory and context"},
+        {"name": "session", "description": "Session management"},
+        {"name": "analysis", "description": "Query analysis for active feedback"}
+    ]
+)
+
+from dataclasses import dataclass
+from typing import BinaryIO
+
+@dataclass
+class FileWrapper:
+    # file: BinaryIO
+    # filename: str
+
+    def __init__(self, filepath, filename):
+        self.name = filename  # Original filename for extension detection
+        self._path = filepath
+
+    def read(self):
+        with open(self._path, 'rb') as f:
+            return f.read()
+
+# Candidate directories where generated reports may be stored inside the container
+DEFAULT_REPORT_DIR = Path.cwd() / "app"
+API_DIR = Path(__file__).parent
+REPO_ROOT = Path.cwd()
+REPORTS_DIRS = [DEFAULT_REPORT_DIR, API_DIR, REPO_ROOT]
+
+try:
+    DEFAULT_REPORT_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    pass
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Adjust for production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ============================================================================
+# SESSION & MEMORY MANAGEMENT
+# ============================================================================
+
+class SessionMemory:
+    """
+    Manages conversation memory per session.
+    Each client gets a unique session_id and isolated memory.
+    """
+    def __init__(self):
+        self.sessions: Dict[str, Dict[str, Any]] = {}
+
+    def create_session(self, session_id: str = None) -> str:
+        """Create a new session with isolated memory"""
+        if not session_id:
+            session_id = str(uuid.uuid4())
+
+        if session_id not in self.sessions:
+            self.sessions[session_id] = {
+                'created_at': datetime.now().isoformat(),
+                'message_count': 0,
+                'chat_history': [],
+                'conversation_vectorstore': None,
+                'last_activity': datetime.now().isoformat()
+            }
+            logger.info(f"Created new session: {session_id}")
+
+        return session_id
+
+    def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """Get session data"""
+        return self.sessions.get(session_id)
+
+    def add_message(self, session_id: str, role: str, content: str):
+        """Add message to session history"""
+        if session_id not in self.sessions:
+            self.create_session(session_id)
+
+        self.sessions[session_id]['chat_history'].append({
+            'role': role,
+            'content': content,
+            'timestamp': datetime.now().isoformat()
+        })
+        self.sessions[session_id]['message_count'] += 1
+        self.sessions[session_id]['last_activity'] = datetime.now().isoformat()
+
+    def get_recent_history(self, session_id: str, k: int = 10) -> List[Dict]:
+        """Get recent k messages from session"""
+        session = self.get_session(session_id)
+        if not session:
+            return []
+        return session['chat_history'][-k*2:]  # Get last k exchanges (user + assistant)
+
+    def clear_session(self, session_id: str):
+        """Clear session memory"""
+        if session_id in self.sessions:
+            del self.sessions[session_id]
+            logger.info(f"Cleared session: {session_id}")
+
+    def update_vectorstore(self, session_id: str, vectorstore):
+        """Update conversation vectorstore for session"""
+        if session_id in self.sessions:
+            self.sessions[session_id]['conversation_vectorstore'] = vectorstore
+
+# Global session manager
+session_manager = SessionMemory()
+
+# ----------------------------------------------------------------------------
+# Config & Helpers
+# ----------------------------------------------------------------------------
+class _Cfg:
+    MAX_FILE_SIZE = 1024 * 1024 * 1024 
+    MAX_FILES = None
+    DEFAULT_BATCH = 15
+    DEFAULT_DELAY = 0.2
+    DEFAULT_RETRIES = 3
+
+app_start = time.time()
+request_counter = 0
+
+def _req_id() -> str:
+    global request_counter
+    request_counter += 1
+    return f"req_{int(time.time())}_{request_counter}"
+
+# ----------------------------------------------------------------------------
+# In-memory Vectorstore Cache
+# ----------------------------------------------------------------------------
+VECTORSTORE_CACHE: Dict[str, Any] = {"global": None, "company": None, "evidence": None, "chat": None}
+
+# ----------------------------------------------------------------------------
+# Pydantic models
+# ----------------------------------------------------------------------------
+class KBReq(BaseModel):
+    selected_model: str = Field(..., description="Ollama model name")
+    batch_size: int = Field(_Cfg.DEFAULT_BATCH, ge=1, le=100)
+    delay_between_batches: float = Field(_Cfg.DEFAULT_DELAY, ge=0.0, le=10.0)
+    max_retries: int = Field(_Cfg.DEFAULT_RETRIES, ge=1, le=10)
+
+    @validator("selected_model")
+    def _not_blank(cls, v):
+        if not v.strip():
+            raise ValueError("Model name must not be blank")
+        return v.strip()
+
+class FileResult(BaseModel):
+    filename: str
+    size_bytes: int
+    status: str
+    processing_time: float
+
+class KBResp(BaseModel):
+    success: bool
+    message: str
+    processing_summary: Dict[str, Any]
+    vector_count: Optional[int] = None
+    error_details: Optional[str] = None
+    files_processed: Optional[List[FileResult]] = None
+
+class AssessmentRequest(BaseModel):
+    selected_model: str = Field(..., description="Ollama model for assessment")
+    max_workers: int = Field(4, ge=1, le=20, description="Number of worker threads")
+
+class AssessmentResponse(BaseModel):
+    success: bool
+    message: str
+    workbook_path: Optional[str] = None
+    processing_summary: Dict[str, Any]
+    error_details: Optional[str] = None
+
+class ChatRequest(BaseModel):
+    selected_model: str = Field(..., description="Ollama model for chat")
+    user_input: str = Field(..., description="User question or prompt")
+    session_id: Optional[str] = Field(None, description="Session ID for conversation continuity")
+    include_history: bool = Field(True, description="Whether to include conversation history")
+    global_kb_path: Optional[str] = Field(None, description="Path to saved global FAISS KB")
+    company_kb_path: Optional[str] = Field(None, description="Path to saved company FAISS KB")
+    chat_kb_path: Optional[str] = Field(None, description="Path to saved chat attachments FAISS KB")
+    evid_kb_path: Optional[str] = Field(None, description="Path to saved evidence FAISS KB")
+    embedding_model: Optional[str] = Field(None, description="Optional embedding model name")
+
+class ChatResponse(BaseModel):
+    success: bool
+    session_id: str
+    response: Optional[str] = None
+    error: Optional[str] = None
+    message_count: int = 0
+    loaded_paths: Optional[Dict[str, Optional[str]]] = None
+
+# ============================================================================
+# PHASE 2: QUERY ANALYSIS MODELS
+# ============================================================================
+
+class QueryAnalysisRequest(BaseModel):
+    user_input: str = Field(..., description="User query to analyze")
+    kb_loaded: bool = Field(False, description="Whether knowledge base is loaded")
+    company_loaded: bool = Field(False, description="Whether company KB is loaded")
+    evidence_loaded: bool = Field(False, description="Whether evidence KB is loaded")
+
+class QueryAnalysisResponse(BaseModel):
+    can_proceed: bool
+    missing_context: List[str]
+    clarification_needed: bool
+    reasoning: str
+    agent_request: Optional[Dict[str, Any]] = None
+
+# ----------------------------------------------------------------------------
+# Validation helpers
+# ----------------------------------------------------------------------------
+def _validate_upload(file: UploadFile) -> List[str]:
+    errs = []
+    if not file.filename:
+        errs.append("Missing filename")
+        return errs
+    if file.size and file.size > _Cfg.MAX_FILE_SIZE:
+        size_mb = file.size / 1024 / 1024
+        max_mb = _Cfg.MAX_FILE_SIZE / 1024 / 1024
+        errs.append(f"File {file.filename} is {size_mb:.1f} MB (max {max_mb} MB)")
+    return errs
+
+# ----------------------------------------------------------------------------
+# Meta Endpoints
+# ----------------------------------------------------------------------------
+@app.get("/", tags=["meta"], summary="API root")
+async def root():
+    return {
+        "name": app.title,
+        "version": app.version,
+        "docs": "/docs",
+        "health": "/health",
+        "endpoints": {
+            "build_kb": "/build-knowledge-base",
+            "assess": "/assess-evidence",
+            "summary": "/generate-summary",
+            "models": "/models",
+            "chat": "/chat",
+            "compare-regulations": "/compare-regulations",
+            "analyze": "/analyze-query",
+            "session_create": "/session/create",
+            "session_info": "/session/{session_id}",
+            "session_clear": "/session/{session_id}",
+            "session_history": "/session/{session_id}/history"
+        }
+    }
+
+@app.get("/health", tags=["meta"], summary="Health check")
+async def health():
+    return {
+        "status": "ok",
+        "uptime_seconds": time.time() - app_start,
+        "requests": request_counter,
+        "active_sessions": len(session_manager.sessions)
+    }
+
+@app.get("/models", tags=["models"], summary="Available Ollama models")
+async def models():
+    try:
+        names = [m for m in get_ollama_model_names() if "embed" not in m]
+        return {"models": names, "count": len(names)}
+    except Exception as e:
+        raise HTTPException(500, f"Failed fetching models: {e}")
+
+# ============================================================================
+# SESSION MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@app.post("/session/create", tags=["session"])
+async def create_session():
+    """Create a new chat session"""
+    session_id = session_manager.create_session()
+    return {"session_id": session_id, "created_at": datetime.now().isoformat()}
+
+@app.get("/session/{session_id}", tags=["session"])
+async def get_session_info(session_id: str):
+    """Get session information"""
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+
+    return {
+        "session_id": session_id,
+        "created_at": session['created_at'],
+        "message_count": session['message_count'],
+        "last_activity": session['last_activity'],
+        "has_vectorstore": session['conversation_vectorstore'] is not None
+    }
+
+@app.delete("/session/{session_id}", tags=["session"])
+async def clear_session(session_id: str):
+    """Clear session memory"""
+    session_manager.clear_session(session_id)
+    return {"success": True, "message": f"Session {session_id} cleared"}
+
+@app.get("/session/{session_id}/history", tags=["session"])
+async def get_session_history(session_id: str, limit: int = 50):
+    """Get session conversation history"""
+    session = session_manager.get_session(session_id)
+    if not session:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Session not found")
+
+    history = session['chat_history'][-limit:]
+    return {"session_id": session_id, "messages": history, "total": len(history)}
+
+# ============================================================================
+# PHASE 2: HELPER FUNCTION
+# ============================================================================
+
+def create_agent_request_api(needs: dict) -> dict:
+    """Create agent request for API"""
+    if needs['clarification_needed']:
+        return {
+            'type': 'clarification',
+            'message': 'Please provide more details about what you would like to know. For example, you could ask about specific security policies, request an assessment of evidence files, or inquire about company-specific compliance requirements.'
+        }
+
+    if needs['missing_context']:
+        file_map = {
+            'policy_documents': {
+                'category': 'policy',
+                'types': ['pdf', 'txt', 'docx'],
+                'description': 'security policies and standards (e.g., ISO 27001, NIST frameworks)'
+            },
+            'evidence_files': {
+                'category': 'evidence',
+                'types': ['log', 'txt', 'csv', 'pdf'],
+                'description': 'security logs and evidence files (e.g., access logs, firewall logs)'
+            },
+            'company_documents': {
+                'category': 'company',
+                'types': ['pdf', 'txt', 'docx', 'xlsx'],
+                'description': 'company-specific documents (e.g., SOC 2 reports, CRI profiles)'
+            }
+        }
+
+        missing = needs['missing_context'][0]
+        file_info = file_map.get(missing, {})
+
+        return {
+            'type': 'file_upload',
+            'message': f"To proceed with your request, I need {file_info.get('description', 'required files')}. Please upload the necessary files.",
+            'file_category': file_info.get('category', 'general'),
+            'accepted_types': file_info.get('types', ['pdf', 'txt']),
+            'missing_type': missing
+        }
+
+    return None
+
+# ============================================================================
+# PHASE 2: ANALYSIS ENDPOINT
+# ============================================================================
+
+@app.post("/analyze-query", response_model=QueryAnalysisResponse, tags=["analysis"])
+async def analyze_query(request: QueryAnalysisRequest):
+    """
+    Analyze user query to determine if agent can proceed or needs additional context.
+    This enables the active feedback loop.
+    """
+    needs = {
+        'can_proceed': True,
+        'missing_context': [],
+        'clarification_needed': False,
+        'reasoning': ''
+    }
+
+    query_lower = request.user_input.lower()
+
+    # Define keyword patterns
+    policy_keywords = ['policy', 'policies', 'standard', 'standards', 'guideline', 
+                      'compliance', 'regulation', 'requirement', 'framework', 'iso', 'nist']
+    evidence_keywords = ['assess', 'audit', 'test', 'verify', 'evidence', 'log', 
+                        'logs', 'analyze', 'review', 'check', 'examine', 'investigate']
+    company_keywords = ['company', 'organization', 'soc', 'soc2', 'cri', 'profile',
+                       'specific', 'our', 'internal', 'organizational']
+
+    # Check for missing knowledge bases
+    if any(keyword in query_lower for keyword in policy_keywords):
+        if not request.kb_loaded:
+            needs['can_proceed'] = False
+            needs['missing_context'].append('policy_documents')
+            needs['reasoning'] = 'Query requires security policies/standards but none are loaded'
+
+    if any(keyword in query_lower for keyword in evidence_keywords):
+        if not request.evidence_loaded:
+            needs['can_proceed'] = False
+            needs['missing_context'].append('evidence_files')
+            needs['reasoning'] = 'Query requires evidence/log files for assessment but none are loaded'
+
+    if any(keyword in query_lower for keyword in company_keywords):
+        if not request.company_loaded:
+            needs['can_proceed'] = False
+            needs['missing_context'].append('company_documents')
+            needs['reasoning'] = 'Query requires company-specific documents but none are loaded'
+
+    # Check for vague queries
+    words = request.user_input.strip().split()
+    if len(words) < 3:
+        needs['clarification_needed'] = True
+        needs['reasoning'] = 'Query is too short or vague to determine intent'
+
+    # Check for generic queries
+    generic_patterns = ['help', 'hi', 'hello', 'what can you do', 'explain']
+    if any(pattern in query_lower for pattern in generic_patterns) and len(words) < 5:
+        needs['clarification_needed'] = True
+        needs['reasoning'] = 'Query is generic and needs more specific context'
+
+    # Create agent request if needed
+    agent_request = None
+    if not needs['can_proceed'] or needs['clarification_needed']:
+        agent_request = create_agent_request_api(needs)
+
+    logger.info(f"Query analysis: can_proceed={needs['can_proceed']}, missing={needs['missing_context']}, clarification={needs['clarification_needed']}")
+
+    return QueryAnalysisResponse(
+        can_proceed=needs['can_proceed'],
+        missing_context=needs['missing_context'],
+        clarification_needed=needs['clarification_needed'],
+        reasoning=needs['reasoning'],
+        agent_request=agent_request
+    )
+
+# ============================================================================
+# ENHANCED CHAT ENDPOINT WITH MEMORY (FIXED)
+# ============================================================================
+
+@app.post("/chat", response_model=ChatResponse, tags=["chat"], summary="Chat with memory")
+async def chat_with_memory(request: ChatRequest):
+    """
+    Enhanced chat endpoint with conversation memory.
+    Maintains per-session history and semantic retrieval.
+
+    ALL BUSINESS LOGIC IS DELEGATED TO utils/chat.py
+    This endpoint only handles HTTP concerns: validation, session mgmt, error handling
+    """
+    rid = _req_id()
+    logger.info(f"[{rid}] Chat request - model: {request.selected_model}, session: {request.session_id}")
+
+    # ========================================================================
+    # IMPORT CHAT LOGIC FROM utils/chat.py
+    # ========================================================================
+    from utils.chat import chat_with_ai_with_memory, update_conversation_vectorstore_api
+
+    # Validate input
+    try:
+        request.selected_model = request.selected_model.strip()
+        request.user_input = request.user_input.strip()
+        if not request.selected_model or not request.user_input:
+            raise ValueError("selected_model and user_input are required")
+    except Exception as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+    # Create or get session
+    session_id = request.session_id or session_manager.create_session()
+    session = session_manager.get_session(session_id)
+    if not session:
+        session_id = session_manager.create_session(session_id)
+        session = session_manager.get_session(session_id)
+
+    # Setup paths
+    request.global_kb_path = request.global_kb_path or "saved_global_vectorstore"
+    request.company_kb_path = request.company_kb_path or "saved_company_vectorstore"
+    request.chat_kb_path = request.chat_kb_path or "chat_attachment_vectorstore"
+
+    base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    embed_name = request.embedding_model or os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
+    embeddings_for_load = OllamaEmbeddings(model=embed_name, base_url=base_url)
+
+    # Load vectorstores
+    loaded_stores: Dict[str, Any] = {"global": None, "company": None, "evidence": None, "chat": None}
+    loaded_paths: Dict[str, Optional[str]] = {"global": None, "company": None, "evidence": None, "chat": None}
+
+    try:
+        if request.global_kb_path and Path(request.global_kb_path).exists():
+            loaded_stores['global'] = load_faiss_vectorstore(request.global_kb_path, embeddings_for_load)
+            loaded_paths['global'] = request.global_kb_path
+        if request.company_kb_path and Path(request.company_kb_path).exists():
+            loaded_stores['company'] = load_faiss_vectorstore(request.company_kb_path, embeddings_for_load)
+            loaded_paths['company'] = request.company_kb_path
+        if request.evid_kb_path and Path(request.evid_kb_path).exists():
+            loaded_stores['evidence'] = load_faiss_vectorstore(request.evid_kb_path, embeddings_for_load)
+            loaded_paths['evidence'] = request.evid_kb_path
+        if request.chat_kb_path and Path(request.chat_kb_path).exists():
+            loaded_stores['chat'] = load_faiss_vectorstore(request.chat_kb_path, embeddings_for_load)
+            loaded_paths['chat'] = request.chat_kb_path
+
+        # Use cached evidence if available
+        if VECTORSTORE_CACHE["evidence"]:
+            loaded_stores['evidence'] = VECTORSTORE_CACHE["evidence"]
+            loaded_paths['evidence'] = "in-memory"
+    except Exception as e:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Vectorstore loading error: {e}")
+
+    try:
+        # ========================================================================
+        # CALL THE MAIN CHAT LOGIC FROM utils/chat.py
+        # All prompt construction, LLM invocation, and context handling happens here
+        # ========================================================================
+        response_text = chat_with_ai_with_memory(
+            kb_vectorstore=loaded_stores['global'],
+            company_kb_vectorstore=loaded_stores['company'],
+            evid_vectorstore=loaded_stores['evidence'],
+            chat_attachment_vectorstore=loaded_stores['chat'],
+            selected_model=request.selected_model,
+            user_input=request.user_input,
+            session_manager=session_manager,
+            session_id=session_id,
+            embedding_model=embeddings_for_load,
+            include_history=request.include_history
+        )
+
+        # Save to session memory
+        session_manager.add_message(session_id, "user", request.user_input)
+        session_manager.add_message(session_id, "assistant", response_text)
+
+        # ========================================================================
+        # UPDATE CONVERSATION VECTORSTORE USING UTILITY FUNCTION
+        # ========================================================================
+        update_conversation_vectorstore_api(
+            user_input=request.user_input,
+            bot_response=response_text,
+            session_manager=session_manager,
+            session_id=session_id,
+            embedding_model=embeddings_for_load
+        )
+
+        return ChatResponse(
+            success=True,
+            session_id=session_id,
+            response=response_text,
+            message_count=session['message_count'],
+            loaded_paths=loaded_paths
+        )
+
+    except Exception as e:
+        logger.error(f"Chat error: {e}")
+        return ChatResponse(
+            success=False,
+            session_id=session_id,
+            error=str(e),
+            message_count=session.get('message_count', 0),
+            loaded_paths=loaded_paths
+        )
+
+
+# ----------------------------------------------------------------------------
+# Knowledge Base Building Endpoint
+# ----------------------------------------------------------------------------
+@app.post(
+    "/build-knowledge-base",
+    response_model=KBResp,
+    tags=["knowledge-base"],
+    summary="Build a knowledge base from uploaded files"
+)
+async def build_kb(
+    selected_model: str = Form(...),
+    batch_size: int = Form(_Cfg.DEFAULT_BATCH),
+    delay_between_batches: float = Form(_Cfg.DEFAULT_DELAY),
+    max_retries: int = Form(_Cfg.DEFAULT_RETRIES),
+    files: List[UploadFile] = File(...),
+    kb_type: str = Form("global", description="Type of KB: global/company/evidence"),
+    files_source: str = Form("User Upload", description="Source of the uploaded files")
+):
+    rid = _req_id()
+    t0 = time.time()
+    logger.info(f"[{rid}] Received request with {len(files)} files for kb_type={kb_type}")
+
+    try:
+        KBReq(
+            selected_model=selected_model,
+            batch_size=batch_size,
+            delay_between_batches=delay_between_batches,
+            max_retries=max_retries
+        )
+    except Exception as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+    if _Cfg.MAX_FILES and len(files) > _Cfg.MAX_FILES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Max {_Cfg.MAX_FILES} files per request")
+
+    errs: List[str] = []
+    for f in files:
+        errs.extend([f"{f.filename}: {e}" for e in _validate_upload(f)])
+    if errs:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "; ".join(errs))
+
+    tmp_paths: List[str] = []
+    file_objs: List[Any] = []
+    file_results: List[FileResult] = []
+
+    try:
+        for uf in files:
+            start = time.time()
+            ext = Path(uf.filename).suffix or ".tmp"
+
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            tmp.write(await uf.read())
+            tmp.close()
+            file_objs.append(FileWrapper(tmp.name, uf.filename))
+
+            file_results.append(FileResult(
+                filename=uf.filename,
+                size_bytes=uf.size or 0,
+                status="saved",
+                processing_time=time.time() - start
+            ))
+
+        vectorstore = build_knowledge_base(
+            files=file_objs,
+            source=files_source,
+            selected_model=selected_model,
+            batch_size=batch_size,
+            delay_between_batches=delay_between_batches,
+            max_retries=max_retries
+        )
+
+        VECTORSTORE_CACHE[kb_type] = vectorstore
+
+        vec_count = getattr(vectorstore.index, "ntotal", None)
+        summary = {
+            "files": len(file_objs),
+            "vectors": vec_count,
+            "processing_seconds": time.time() - t0,
+            "model": selected_model
+        }
+        return KBResp(
+            success=True, 
+            message="Knowledge base built", 
+            processing_summary=summary, 
+            vector_count=vec_count, 
+            files_processed=file_results
+        )
+    except Exception as e:
+        return KBResp(
+            success=False, 
+            message="Failed", 
+            processing_summary={}, 
+            error_details=str(e)
+        )
+    finally:
+        for fh in file_objs:
+            try: fh.close()
+            except Exception: pass
+        for p in tmp_paths:
+            try: os.unlink(p)
+            except Exception: pass
+
+# ----------------------------------------------------------------------------
+# Evidence Assessment Endpoint
+# ----------------------------------------------------------------------------
+@app.post(
+    "/assess-evidence",
+    response_model=AssessmentResponse,
+    tags=["assessment"],
+    summary="Assess evidence files against knowledge bases"
+)
+async def assess_evidence(
+    selected_model: str = Form(...),
+    max_workers: int = Form(4),
+    evidence_files: List[UploadFile] = File(...)    
+):   
+    t0 = time.time()
+
+    try:
+        AssessmentRequest(selected_model=selected_model, max_workers=max_workers)
+    except Exception as e:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(e))
+
+    if not evidence_files:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Evidence files are required")  
+
+    evidence_objs: List[Any] = []
+    tmp_paths: List[str] = []       
+    file_results: List[FileResult] = []
+    base_url = os.getenv('OLLAMA_BASE_URL', 'http://localhost:11434')
+    embed_name = os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
+    embeddings_for_load = OllamaEmbeddings(model=embed_name, base_url=base_url)
+
+    try:  
+        for uf in evidence_files:           
+
+            start = time.time()
+            ext = Path(uf.filename).suffix or ".tmp"
+
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            content = await uf.read()
+            tmp.write(content)
+            tmp.close()
+
+            evidence_objs.append(FileWrapper(tmp.name, uf.filename))
+
+            file_results.append(FileResult(
+                filename=uf.filename,
+                size_bytes=len(content),
+                status="saved",
+                processing_time=time.time() - start
+            ))
+
+        global_vectorstore = load_faiss_vectorstore("saved_global_vectorstore", embeddings_for_load)
+        if not global_vectorstore:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "global vectorstores are required")
+        VECTORSTORE_CACHE["global"] = global_vectorstore        
+
+        company_vectorstore = load_faiss_vectorstore("saved_company_vectorstore", embeddings_for_load)
+        if not company_vectorstore:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "company vectorstores are required")
+        VECTORSTORE_CACHE["company"] = company_vectorstore
+
+        evidence_vectorstore = build_knowledge_base(
+            files=evidence_objs,
+            source="Evidence Upload",
+            selected_model=selected_model,
+            batch_size=_Cfg.DEFAULT_BATCH,
+            delay_between_batches=_Cfg.DEFAULT_DELAY,
+            max_retries=_Cfg.DEFAULT_RETRIES
+        )
+        VECTORSTORE_CACHE["evidence"] = evidence_vectorstore
+
+        # Get assessment results
+        assessment_results = assess_evidence_with_kb(
+            evidence_files=evidence_objs,
+            kb_vectorstore=global_vectorstore,
+            company_kb_vectorstore=company_vectorstore,
+            selected_model=selected_model,
+            max_workers=max_workers
+        )
+
+        assessment_summary = generate_executive_summary(assessment_results,selected_model)
+        assessment_results.append(assessment_summary)
+        workbook_path = generate_workbook(assessment_results, None)
+
+        processing_summary = {
+            "evidence_files": len(evidence_files),
+            "evidence_documents": len(evidence_files),
+            "assessment_results": len(assessment_results),
+            "workbook_path": workbook_path,
+            "global_vectors": getattr(global_vectorstore.index, "ntotal", 0),
+            "company_vectors": getattr(company_vectorstore.index, "ntotal", 0),
+            "processing_seconds": time.time() - t0,
+            "model_used": selected_model,
+            "max_workers": max_workers
+        }
+
+        return AssessmentResponse(
+            success=True,
+            message="Evidence assessment completed successfully",
+            workbook_path=workbook_path,
+            processing_summary=processing_summary
+        )
+    except Exception as e:
+        logger.error(f"Assessment failed: {str(e)}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return AssessmentResponse(
+            success=False,
+            message="Assessment failed",
+            processing_summary={},
+            error_details=str(e)
+        )
+    finally:
+        # Clean up temp files only (FileWrapper objects don't need closing)
+        for p in tmp_paths:
+            try: os.unlink(p)
+            except Exception: pass
+
+# ----------------------------------------------------------------------------
+# Executive Summary Endpoint
+# ----------------------------------------------------------------------------
+@app.post("/generate-summary", tags=["assessment"])
+async def generate_summary(selected_model, assessment_results: List[Dict[str, Any]]):
+    try:
+        formatted_results = [{"assessment": r} for r in assessment_results]
+        summary = generate_executive_summary(formatted_results,selected_model)
+        return {"success": True,"executive_summary": summary.get("executive_summary", ""),"input_count": len(assessment_results)}
+    except Exception as e:
+        return {"success": False,"error": str(e),"executive_summary": ""}
+
+# ----------------------------------------------------------------------------
+# Report download endpoint
+# ----------------------------------------------------------------------------
+@app.get("/download-report", tags=["assessment"])
+async def download_report(filename: str):
+    rid = _req_id()
+    logger.info(f"[{rid}] Download request for: {filename}")
+    if not filename or '/' in filename or '\\' in filename:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid filename")
+    found_path = None
+    for d in REPORTS_DIRS:
+        candidate = d / filename
+        if candidate.exists() and candidate.is_file():
+            found_path = candidate
+            break
+    if not found_path:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Report not found")
+    if found_path.suffix.lower() != '.pdf':
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only PDF reports can be downloaded")
+    return FileResponse(path=str(found_path), filename=filename, media_type='application/pdf')
+
+# ----------------------------------------------------------------------------
+# FAISS Vectorstore Save/Load Endpoints
+# ----------------------------------------------------------------------------
+@app.post("/save-vectorstore", tags=["knowledge-base"])
+async def save_vectorstore_api(
+    dir_path: str = Form(...),
+    kb_type: str = Form("global")
+):
+    try:
+        if kb_type == "evidence":
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Evidence KB is only available in memory and cannot be saved to disk"
+            )
+        vs = VECTORSTORE_CACHE.get(kb_type)
+        if vs is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"No vectorstore cached for {kb_type}")
+        saved_path = save_faiss_vectorstore(vs, dir_path)
+        return {"success": True, "path": saved_path, "kb_type": kb_type}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e))
+
+@app.post("/load-vectorstore", tags=["knowledge-base"])
+async def load_vectorstore_api(
+    dir_path: str = Form(...),
+    kb_type: str = Form("global"),
+    model_name: str = Form(...)
+):
+    try:
+        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        embeddings = OllamaEmbeddings(model=model_name, base_url=base_url)
+        vs = load_faiss_vectorstore(dir_path, embeddings)
+        VECTORSTORE_CACHE[kb_type] = vs
+        return {"success": True,"path": dir_path,"kb_type": kb_type,"ntotal": getattr(vs.index, "ntotal", None)}
+    except FileNotFoundError as fe:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(fe))
+    except Exception as e:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, str(e))
+
+#-----------------------------------------------------------------------------
+# Regulatoy Compliance Endpoint Placeholder
+#-----------------------------------------------------------------------------
+@app.post(
+    "/compare-regulations",
+    tags=["analysis"],
+    summary="Compare cybersecurity regulations and assess control stringency"
+)
+async def compare_regulations(
+    selected_model: str = Form(..., description="LLM model to use (e.g., llama3, llama3:70b)"),
+    max_workers: int = Form(4, description="Reserved for future parallel processing"),
+    save_artifacts: bool = Form(False, description="Save detailed analysis artifacts to disk"),
+    output_format: str = Form("json", description="Response format: json or markdown"),
+    regulation_files: List[UploadFile] = File(..., description="Regulatory documents to compare (min 2)")
+):
+    """
+    Compare regulatory frameworks with detailed stringency analysis.
+    
+    This endpoint:
+    1. Analyzes document structure and regulatory approach
+    2. Extracts all risk control requirements
+    3. Groups similar controls across documents
+    4. Calculates multi-dimensional stringency scores
+    5. Generates comprehensive comparison report
+    
+    Returns:
+    - Document framework analysis
+    - Extracted controls with metadata
+    - Stringency scores by domain
+    - Overall compliance gap analysis
+    - Detailed markdown report
+    """
+    rid = _req_id()
+    logger.info(f"[{rid}] Regulation comparison request - Model: {selected_model}")
+
+    # Validation
+    if len(regulation_files) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="At least two regulation files are required for comparison"
+        )
+    
+    if len(regulation_files) > 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Maximum 5 documents supported per comparison"
+        )
+
+    tmp_paths, filenames = [], []
+    output_dir = None
+
+    try:
+        # Save uploaded files
+        for uf in regulation_files:
+            # Validate file type
+            if not uf.filename.lower().endswith(('.pdf', '.txt', '.md')):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unsupported file type: {uf.filename}. Use PDF, TXT, or MD."
+                )
+            
+            ext = Path(uf.filename).suffix or ".tmp"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            content = await uf.read()
+            
+            if len(content) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Empty file: {uf.filename}"
+                )
+            
+            tmp.write(content)
+            tmp.close()
+            tmp_paths.append(tmp.name)
+            filenames.append(uf.filename)
+            
+            logger.info(f"[{rid}] Uploaded: {uf.filename} ({len(content)} bytes)")
+
+        # Run enhanced comparison
+        logger.info(f"[{rid}] Starting analysis...")
+        result = compare_regulatory_documents(
+            file_paths=tmp_paths,
+            filenames=filenames,
+            selected_model=selected_model
+        )
+        
+        # Check for errors
+        if not result.get("success", False):
+            error_msg = result.get("error", "Unknown error during analysis")
+            logger.error(f"[{rid}] Analysis failed: {error_msg}")
+            raise HTTPException(status_code=500, detail=error_msg)
+        
+        logger.info(f"[{rid}] Analysis complete - {result.get('extracted_controls', 0)} controls, "
+                   f"{result.get('control_groups', 0)} groups")
+
+        # Save artifacts if requested
+        if save_artifacts:
+            output_dir = f"./analysis_output/{rid}"
+            save_analysis_artifacts(result, output_dir)
+            result["artifacts_location"] = output_dir
+            logger.info(f"[{rid}] Artifacts saved to {output_dir}")
+
+        # Return based on format
+        if output_format.lower() == "markdown":
+            # Return just the markdown report
+            return JSONResponse({
+                "success": True,
+                "request_id": rid,
+                "model_used": selected_model,
+                "documents": filenames,
+                "report": result.get("final_report", ""),
+                "summary": {
+                    "controls_extracted": result.get("extracted_controls", 0),
+                    "control_groups": result.get("control_groups", 0),
+                    "overall_stringency": result.get("stringency_analysis", {}).get("overall_stringency", {})
+                }
+            })
+        else:
+            # Return full JSON
+            return JSONResponse({
+                "success": True,
+                "request_id": rid,
+                **result
+            })
+
+    except HTTPException:
+        raise
+    
+    except Exception as e:
+        logger.error(f"[{rid}] Regulatory comparison failed")
+        logger.error(traceback.format_exc())
+        
+        # Return detailed error info
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": str(e),
+                "request_id": rid,
+                "traceback": traceback.format_exc() if os.getenv("DEBUG") else None
+            }
+        )
+
+    finally:
+        # Cleanup temporary files
+        for p in tmp_paths:
+            try:
+                os.unlink(p)
+            except Exception as e:
+                logger.warning(f"[{rid}] Failed to delete temp file {p}: {e}")
+
+#-----------------------------------------------------------------------------
+# RCM Compliance Endpoint
+#-----------------------------------------------------------------------------
+@app.post(
+    "/rcm_compliance",
+    tags=["analysis"],
+    summary="Analyze organization's RCM against regulatory/policy documents and generate compliance report"
+)
+async def rcm_compliance(
+    selected_model: str = Form(..., description="LLM model to use (e.g., llama3:13b)"),
+    regulation_files: List[UploadFile] = File(..., description="Regulatory, policy and guideline documents (min 1)"),
+    rcm_file: UploadFile = File(..., description="Organization Risk Control Matrix (single file)"),
+    save_artifacts: bool = Form(False, description="Save detailed artifacts to disk"),
+    output_format: str = Form("json", description="Response format: json or markdown")
+):
+    rid = _req_id()
+    logger.info(f"[{rid}] RCM compliance request - Model: {selected_model}")
+
+    if not regulation_files or len(regulation_files) < 1:
+        raise HTTPException(status_code=400, detail="At least one regulatory/policy document is required")
+
+    tmp_paths = []
+    filenames = []
+    try:
+        # Save regulation files
+        for uf in regulation_files:
+            ext = Path(uf.filename).suffix or ".tmp"
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+            content = await uf.read()
+            if len(content) == 0:
+                raise HTTPException(status_code=400, detail=f"Empty file: {uf.filename}")
+            tmp.write(content)
+            tmp.close()
+            tmp_paths.append(tmp.name)
+            filenames.append(uf.filename)
+            logger.info(f"[{rid}] Uploaded regulation: {uf.filename} ({len(content)} bytes)")
+
+        # Save RCM file
+        ext = Path(rcm_file.filename).suffix or ".tmp"
+        tmp_rcm = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
+        rcm_content = await rcm_file.read()
+        if len(rcm_content) == 0:
+            raise HTTPException(status_code=400, detail=f"Empty RCM file: {rcm_file.filename}")
+        tmp_rcm.write(rcm_content)
+        tmp_rcm.close()
+        tmp_paths.append(tmp_rcm.name)
+        filenames.append(rcm_file.filename)
+        logger.info(f"[{rid}] Uploaded RCM: {rcm_file.filename} ({len(rcm_content)} bytes)")
+
+        # Load and chunk documents
+        splitter = get_text_splitter()
+        reg_docs = []
+        for p, name in zip(tmp_paths[:-1], filenames[:-1]):
+            docs = load_document(p, name)
+            reg_docs.extend(docs)
+
+        rcm_docs = load_document(tmp_rcm.name, rcm_file.filename)
+
+        reg_chunks = splitter.split_documents(reg_docs) if reg_docs else []
+        rcm_chunks = splitter.split_documents(rcm_docs) if rcm_docs else []
+
+        if not reg_chunks:
+            raise HTTPException(status_code=400, detail="No text extracted from regulatory documents")
+        if not rcm_chunks:
+            raise HTTPException(status_code=400, detail="No text extracted from RCM file")
+
+        # Extract requirements and controls
+        req_extractor = RegulatoryRequirementExtractor(selected_model)
+        requirements = req_extractor.run(reg_chunks)
+
+        rcm_extractor = RCMControlExtractor(selected_model)
+        controls = rcm_extractor.run(rcm_chunks)
+
+        # Analyze compliance
+        analyzer = ComplianceAnalyzer(selected_model)
+        analysis = analyzer.analyze_compliance(requirements, controls)
+
+        # Generate remediation suggestions
+        suggester = RemediationSuggester(selected_model)
+        suggestions = suggester.generate_suggestions(analysis.get("gaps", []), analysis.get("domain_analyses", {}))
+
+        # Generate reports
+        reporter = ComplianceReportGenerator(selected_model)
+        executive_summary = reporter.generate_executive_summary(analysis, suggestions)
+
+        domain_reports = {}
+        for domain, domain_analysis in analysis.get("domain_analyses", {}).items():
+            domain_suggestions = suggestions.get(domain, [])
+            domain_reports[domain] = reporter.generate_domain_report(domain, domain_analysis, domain_suggestions)
+
+        result = {
+            "success": True,
+            "request_id": rid,
+            "model_used": selected_model,
+            "filenames": filenames,
+            "analysis": analysis,
+            "suggestions_summary_counts": {k: len(v) for k, v in suggestions.items()},
+            "executive_summary": executive_summary,
+            "domain_reports": domain_reports
+        }
+
+        # Save artifacts if requested
+        if save_artifacts:
+            output_dir = f"./rcm_analysis_output/{rid}"
+            os.makedirs(output_dir, exist_ok=True)
+            # Save raw analysis and suggestions
+            with open(os.path.join(output_dir, "analysis.json"), "w") as fh:
+                json_str = str(result.get("analysis"))
+                fh.write(json_str)
+            with open(os.path.join(output_dir, "suggestions.json"), "w") as fh:
+                fh.write(str(suggestions))
+            result["artifacts_location"] = output_dir
+            logger.info(f"[{rid}] Artifacts saved to {output_dir}")
+
+        # Return based on output_format
+        if output_format.lower() == "markdown":
+            # Return executive summary and domain reports concatenated
+            md_report = {
+                "executive_summary_md": executive_summary,
+                "domain_reports_md": domain_reports
+            }
+            return JSONResponse({"success": True, "request_id": rid, **md_report})
+
+        return JSONResponse(result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[{rid}] RCM compliance failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail={"error": str(e), "request_id": rid})
+    finally:
+        for p in tmp_paths:
+            try:
+                os.unlink(p)
+            except Exception:
+                pass
+
+#-----------------------------------------------------------------------------
+# AI Control Testing Endpoint
+#-----------------------------------------------------------------------------
+
+@app.post("/audit/start", tags=["audit"], response_model=AuditStartResponse)
+async def audit_start(
+    selected_model: str = Form(...),
+    test_script: UploadFile = File(...)
+):
+    """
+    Start an audit session by uploading a test script.
+    Parses the test script and returns evidence checklist.
+    """
+    rid = _req_id()
+    logger.info(f"[{rid}] POST /audit/start - model={selected_model}, file={test_script.filename}")
+    
+    # Cleanup expired sessions
+    audit_session_store.cleanup_expired_sessions()
+    
+    # Validate file
+    errs = _validate_upload(test_script)
+    if errs:
+        raise HTTPException(400, {"errors": errs, "request_id": rid})
+    
+    tmp_test_script = None
+    
+    try:
+        # Save test script to temp file
+        tmp_test_script = tempfile.NamedTemporaryFile(
+            delete=False, 
+            suffix=Path(test_script.filename).suffix
+        )
+        tmp_test_script.write(test_script.file.read())
+        tmp_test_script.close()
+        
+        # Parse test script
+        controls = parse_test_script(tmp_test_script.name)
+        
+        if not controls:
+            raise HTTPException(400, {"error": "No controls found in test script", "request_id": rid})
+        
+        # Validate controls
+        warnings = validate_controls(controls)
+        
+        # Create audit session
+        session_id = audit_session_store.create_session(model=selected_model)
+        
+        # Store test script in session directory
+        session_dir = audit_session_store.get_session_temp_dir(session_id)
+        test_script_path = session_dir / test_script.filename
+        
+        import shutil
+        shutil.copy(tmp_test_script.name, test_script_path)
+        
+        # Set test script data in session
+        audit_session_store.set_test_script(
+            session_id=session_id,
+            filename=test_script.filename,
+            controls=controls
+        )
+        
+        # Build evidence checklist
+        evidence_checklist = []
+        for control in controls:
+            evidence_checklist.append({
+                "control_id": control.get("control_id"),
+                "control_description": control.get("control_description", "")[:150],
+                "evidence_required": control.get("evidence_required", ""),
+                "status": "pending"
+            })
+        
+        logger.info(f"[{rid}] Created audit session {session_id} with {len(controls)} controls")
+        
+        return AuditStartResponse(
+            session_id=session_id,
+            status="awaiting_evidence",
+            controls_found=len(controls),
+            evidence_checklist=evidence_checklist,
+            message=f"Test script parsed successfully. Please upload evidence files for {len(controls)} controls.",
+            warnings=warnings if warnings else None
+        )
+    
+    except HTTPException:
+        raise
+    
+    except Exception as e:
+        logger.error(f"[{rid}] Audit start failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, {"error": str(e), "request_id": rid})
+    
+    finally:
+        if tmp_test_script:
+            try:
+                os.unlink(tmp_test_script.name)
+            except:
+                pass
+
+
+@app.post("/audit/upload-evidence", tags=["audit"], response_model=EvidenceUploadResponse)
+async def audit_upload_evidence(
+    session_id: str = Form(...),
+    evidence_files: List[UploadFile] = File(...)
+):
+    """
+    Upload evidence files for an audit session.
+    Validates files and maps them to controls.
+    """
+    rid = _req_id()
+    logger.info(f"[{rid}] POST /audit/upload-evidence - session={session_id}, files={len(evidence_files)}")
+    
+    # Get session
+    session = audit_session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(404, {"error": "Session not found", "request_id": rid})
+    
+    if session["status"] == "complete":
+        raise HTTPException(400, {"error": "Session already completed", "request_id": rid})
+    
+    model = session["model"]
+    session_dir = audit_session_store.get_session_temp_dir(session_id)
+    evidence_dir = session_dir / "evidence"
+    
+    files_processed = []
+    
+    try:
+        # Get pending controls
+        pending_controls = audit_session_store.get_pending_controls(session_id)
+        
+        # Process each file
+        for evidence_file in evidence_files:
+            # Validate file
+            errs = _validate_upload(evidence_file)
+            if errs:
+                files_processed.append({
+                    "filename": evidence_file.filename,
+                    "validation_status": "rejected",
+                    "reason": "; ".join(errs)
+                })
+                continue
+            
+            # Save file to evidence directory
+            file_path = evidence_dir / evidence_file.filename
+            with open(file_path, "wb") as f:
+                f.write(evidence_file.file.read())
+            
+            # Validate evidence
+            validation_result = validate_evidence_file(
+                file_path=str(file_path),
+                filename=evidence_file.filename,
+                pending_controls=pending_controls,
+                model=model
+            )
+            
+            # Add to session
+            audit_session_store.add_uploaded_file(
+                session_id=session_id,
+                filename=evidence_file.filename,
+                tmp_path=str(file_path),
+                file_size=file_path.stat().st_size,
+                validation_result=validation_result
+            )
+            
+            # Build response for this file
+            files_processed.append({
+                "filename": evidence_file.filename,
+                "validation_status": validation_result["validation_status"],
+                "content_type_detected": validation_result.get("content_type_detected"),
+                "satisfies_controls": validation_result.get("satisfies_controls", []),
+                "reason": validation_result.get("rejection_reason") or "File accepted"
+            })
+        
+        # Get updated session state
+        session = audit_session_store.get_session(session_id)
+        evidence_summary = audit_session_store.get_evidence_summary(session_id)
+        pending_controls_updated = audit_session_store.get_pending_controls(session_id)
+        ready_to_generate = evidence_summary["pending"] == 0
+        
+        message = f"Processed {len(files_processed)} files. "
+        if ready_to_generate:
+            message += "All evidence received. Ready to generate workpaper."
+        else:
+            message += f"{evidence_summary['pending']} controls still need evidence."
+        
+        logger.info(f"[{rid}] Evidence upload complete. {evidence_summary['received']}/{evidence_summary['total_controls']} received")
+        
+        return EvidenceUploadResponse(
+            session_id=session_id,
+            status=session["status"],
+            files_processed=files_processed,
+            evidence_summary=evidence_summary,
+            pending_controls=pending_controls_updated,
+            ready_to_generate=ready_to_generate,
+            message=message
+        )
+    
+    except HTTPException:
+        raise
+    
+    except Exception as e:
+        logger.error(f"[{rid}] Evidence upload failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, {"error": str(e), "request_id": rid})
+
+
+@app.post("/audit/generate-workpaper", tags=["audit"], response_model=WorkpaperResponse)
+async def audit_generate_workpaper(
+    session_id: str = Form(...),
+    force_generate: bool = Form(False)
+):
+    """
+    Generate workpaper from analyzed evidence.
+    Set force_generate=True to generate even with missing evidence.
+    """
+    rid = _req_id()
+    logger.info(f"[{rid}] POST /audit/generate-workpaper - session={session_id}, force={force_generate}")
+    
+    # Get session
+    session = audit_session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(404, {"error": "Session not found", "request_id": rid})
+    
+    # Check if evidence is complete
+    evidence_summary = audit_session_store.get_evidence_summary(session_id)
+    pending_controls = audit_session_store.get_pending_controls(session_id)
+    
+    if evidence_summary["pending"] > 0 and not force_generate:
+        raise HTTPException(400, {
+            "error": "Incomplete evidence",
+            "message": f"{evidence_summary['pending']} controls still need evidence. Set force_generate=true to proceed anyway.",
+            "pending_controls": pending_controls,
+            "request_id": rid
+        })
+    
+    try:
+        # Load knowledge bases
+        kb1_path = os.getenv("KB1_PATH", "saved_global_vectorstore")
+        kb2_path = os.getenv("KB2_PATH", "saved_company_vectorstore")
+        
+        logger.info(f"[{rid}] Loading KBs: {kb1_path}, {kb2_path}")
+        
+        # Try to load KBs from disk
+        kb1_vectorstore = None
+        kb2_vectorstore = None
+        
+        try:
+            kb1_vectorstore = load_faiss_vectorstore(kb1_path)
+            logger.info(f"[{rid}] Loaded KB1 from {kb1_path}")
+        except Exception as e:
+            logger.warning(f"[{rid}] Could not load KB1: {e}")
+        
+        try:
+            kb2_vectorstore = load_faiss_vectorstore(kb2_path)
+            logger.info(f"[{rid}] Loaded KB2 from {kb2_path}")
+        except Exception as e:
+            logger.warning(f"[{rid}] Could not load KB2: {e}")
+        
+        # Analyze all controls
+        model = session["model"]
+        
+        logger.info(f"[{rid}] Starting analysis of {len(session['controls'])} controls")
+        
+        analysis_results = analyze_all_controls(
+            session_data=session,
+            kb1_vectorstore=kb1_vectorstore,
+            kb2_vectorstore=kb2_vectorstore,
+            model=model
+        )
+        
+        logger.info(f"[{rid}] Analysis complete. Generating workpaper.")
+        
+        # Generate summary
+        summary = generate_overall_summary(analysis_results)
+        
+        # Fill workpaper template
+        template_path = Path(__file__).parent / "utils" / "Consolidated_WP_Template.xlsx"
+        session_dir = audit_session_store.get_session_temp_dir(session_id)
+        output_dir = session_dir / "output"
+        
+        workpaper_filename = f"workpaper_{session_id}.xlsx"
+        workpaper_path = output_dir / workpaper_filename
+        
+        fill_workpaper_template(
+            template_path=str(template_path),
+            output_path=str(workpaper_path),
+            session_data=session,
+            analysis_results=analysis_results
+        )
+        
+        logger.info(f"[{rid}] Workpaper generated: {workpaper_path}")
+        
+        # Mark session complete
+        audit_session_store.mark_analysis_complete(
+            session_id=session_id,
+            workpaper_path=str(workpaper_path),
+            pdf_path=None
+        )
+        
+        # Build download URL
+        download_url = f"/audit/download/{session_id}/{workpaper_filename}"
+        
+        return WorkpaperResponse(
+            session_id=session_id,
+            status="complete",
+            workpaper_filename=workpaper_filename,
+            pdf_filename=None,
+            summary=summary,
+            download_url=download_url,
+            message=f"Workpaper generated successfully. {summary['controls_tested']} controls tested, {summary['pass_count']} passed."
+        )
+    
+    except HTTPException:
+        raise
+    
+    except Exception as e:
+        logger.error(f"[{rid}] Workpaper generation failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, {"error": str(e), "request_id": rid, "traceback": traceback.format_exc()})
+
+
+@app.get("/audit/download/{session_id}/{filename}", tags=["audit"])
+async def audit_download_file(session_id: str, filename: str):
+    """Download generated workpaper file."""
+    session = audit_session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    
+    session_dir = audit_session_store.get_session_temp_dir(session_id)
+    file_path = session_dir / "output" / filename
+    
+    if not file_path.exists():
+        raise HTTPException(404, "File not found")
+    
+    return FileResponse(
+        path=str(file_path),
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
+@app.delete("/audit/session/{session_id}", tags=["audit"])
+async def audit_clear_session(session_id: str):
+    """Clear audit session and delete temp files."""
+    session = audit_session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    
+    audit_session_store.clear_session(session_id)
+    
+    return {"message": f"Session {session_id} cleared", "success": True}
+
+# ----------------------------------------------------------------------------
+# Run with:  uvicorn api.main:app --reload
+# ----------------------------------------------------------------------------
+if __name__ == "__main__":
+    import uvicorn    
+    uvicorn.run("api.main:app", host="0.0.0.0", port=5000, reload=True)
