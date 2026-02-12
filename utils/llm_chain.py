@@ -212,7 +212,7 @@ def extract_and_validate_json(text):
     except Exception as e:
         raise ValueError(f"Could not parse JSON after cleaning: {e}")
 
-def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, selected_model, chunk_index=0, doc_index=0, filename="N/A"):
+def _assess_single_evidence(evid_text, kb_vectorstore, company_kb_vectorstore, selected_model, chunk_index=0, doc_index=0, filename="N/A", evidence_context=None):
     initialize(selected_model)
     try:
         parser = PydanticOutputParser(pydantic_object=Assessment)        
@@ -376,7 +376,7 @@ def render_text_to_image(evidence_docs, font_size=14, width=1200, bg_color="whit
             y += line_height
         return img
 
-def assess_evidence_with_kb(evidence_files, kb_vectorstore, company_kb_vectorstore, selected_model, max_workers=4):
+def assess_evidence_with_kb(evidence_files, kb_vectorstore, company_kb_vectorstore, selected_model, max_workers=4, evidence_context=None):
     start = time.time()
     evid_texts, chunk_origin = [], []  
     evidence_docs = save_and_load_files(evidence_files, "Evidence Assessment result")

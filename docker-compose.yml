@@ -24,8 +24,10 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ["0"]     # 👈 PIN TO RTX 3060
+              count : all     # 👈 PIN TO RTX 3060
               capabilities: [gpu]     # Request GPU capabilities
+    
+    runtime: nvidia
     
     # Improved healthcheck with longer startup time for GPU initialization
     healthcheck:

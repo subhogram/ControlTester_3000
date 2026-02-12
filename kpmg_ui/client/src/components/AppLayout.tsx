@@ -17,7 +17,7 @@ interface AppLayoutProps {
 
 const tabs = [
   { title: "Regulatory Testing", path: "/", icon: Scale },
-  { title: "AI-Risk Assessment", path: "/evidence-assessment", icon: FileSearch },
+  { title: "Final Report", path: "/evidence-assessment", icon: FileSearch },
   { title: "AI Control Testing", path: "/control-testing", icon: TestTube },
   { title: "Chat", path: "/chat", icon: MessageSquare },
   { title: "Settings", path: "/settings", icon: Settings },

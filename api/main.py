@@ -21,6 +21,11 @@ import logging
 import traceback
 from pathlib import Path
 from utils.file_handlers import save_faiss_vectorstore, load_faiss_vectorstore
+from utils.audit_session_store import audit_session_store
+from utils.test_script_parser import parse_test_script, validate_controls
+from utils.evidence_validator import validate_evidence_file
+from utils.audit_analyzer import analyze_all_controls, generate_overall_summary
+from utils.workpaper_filler import fill_workpaper_template
 
 # utils imports
 from utils.llm_chain import build_knowledge_base, assess_evidence_with_kb, generate_executive_summary
@@ -55,6 +60,32 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+class AuditStartResponse(BaseModel):
+    session_id: str
+    status: str
+    controls_found: int
+    evidence_checklist: List[Dict[str, Any]]
+    message: str
+    warnings: Optional[List[str]] = None
+
+class EvidenceUploadResponse(BaseModel):
+    session_id: str
+    status: str
+    files_processed: List[Dict[str, Any]]
+    evidence_summary: Dict[str, int]
+    pending_controls: List[Dict[str, Any]]
+    ready_to_generate: bool
+    message: str
+
+class WorkpaperResponse(BaseModel):
+    session_id: str
+    status: str
+    workpaper_filename: Optional[str]
+    pdf_filename: Optional[str]
+    summary: Dict[str, Any]
+    download_url: Optional[str]
+    message: str
 
 # ----------------------------------------------------------------------------
 # FastAPI instance & CORS
@@ -765,15 +796,15 @@ async def assess_evidence(
                 processing_time=time.time() - start
             ))
 
-        global_vectorstore = load_faiss_vectorstore("saved_global_vectorstore", embeddings_for_load)
-        if not global_vectorstore:
+        saved_global_vectorstore = load_faiss_vectorstore("saved_global_vectorstore", embeddings_for_load)
+        if not saved_global_vectorstore:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "global vectorstores are required")
-        VECTORSTORE_CACHE["global"] = global_vectorstore        
+        VECTORSTORE_CACHE["global"] = saved_global_vectorstore        
 
-        company_vectorstore = load_faiss_vectorstore("saved_company_vectorstore", embeddings_for_load)
-        if not company_vectorstore:
+        saved_company_vectorstore = load_faiss_vectorstore("saved_company_vectorstore", embeddings_for_load)
+        if not saved_company_vectorstore:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "company vectorstores are required")
-        VECTORSTORE_CACHE["company"] = company_vectorstore
+        VECTORSTORE_CACHE["company"] = saved_company_vectorstore
 
         evidence_vectorstore = build_knowledge_base(
             files=evidence_objs,
@@ -788,8 +819,8 @@ async def assess_evidence(
         # Get assessment results
         assessment_results = assess_evidence_with_kb(
             evidence_files=evidence_objs,
-            kb_vectorstore=global_vectorstore,
-            company_kb_vectorstore=company_vectorstore,
+            kb_vectorstore=saved_global_vectorstore,
+            company_kb_vectorstore=saved_company_vectorstore,
             selected_model=selected_model,
             max_workers=max_workers
         )
@@ -803,8 +834,8 @@ async def assess_evidence(
             "evidence_documents": len(evidence_files),
             "assessment_results": len(assessment_results),
             "workbook_path": workbook_path,
-            "global_vectors": getattr(global_vectorstore.index, "ntotal", 0),
-            "company_vectors": getattr(company_vectorstore.index, "ntotal", 0),
+            "global_vectors": getattr(saved_global_vectorstore.index, "ntotal", 0),
+            "company_vectors": getattr(saved_company_vectorstore.index, "ntotal", 0),
             "processing_seconds": time.time() - t0,
             "model_used": selected_model,
             "max_workers": max_workers
@@ -1192,6 +1223,361 @@ async def rcm_compliance(
                 os.unlink(p)
             except Exception:
                 pass
+
+#-----------------------------------------------------------------------------
+# AI Control Testing Endpoint
+#-----------------------------------------------------------------------------
+
+@app.post("/audit/start", tags=["audit"], response_model=AuditStartResponse)
+async def audit_start(
+    selected_model: str = Form(...),
+    test_script: UploadFile = File(...)
+):
+    """
+    Start an audit session by uploading a test script.
+    Parses the test script and returns evidence checklist.
+    """
+    rid = _req_id()
+    logger.info(f"[{rid}] POST /audit/start - model={selected_model}, file={test_script.filename}")
+    
+    # Cleanup expired sessions
+    audit_session_store.cleanup_expired_sessions()
+    
+    # Validate file
+    errs = _validate_upload(test_script)
+    if errs:
+        raise HTTPException(400, {"errors": errs, "request_id": rid})
+    
+    tmp_test_script = None
+    
+    try:
+        # Save test script to temp file
+        tmp_test_script = tempfile.NamedTemporaryFile(
+            delete=False, 
+            suffix=Path(test_script.filename).suffix
+        )
+        tmp_test_script.write(test_script.file.read())
+        tmp_test_script.close()
+        
+        # Parse test script
+        controls = parse_test_script(tmp_test_script.name)
+        
+        if not controls:
+            raise HTTPException(400, {"error": "No controls found in test script", "request_id": rid})
+        
+        # Validate controls
+        warnings = validate_controls(controls)
+        
+        # Create audit session
+        session_id = audit_session_store.create_session(model=selected_model)
+        
+        # Store test script in session directory
+        session_dir = audit_session_store.get_session_temp_dir(session_id)
+        test_script_path = session_dir / test_script.filename
+        
+        import shutil
+        shutil.copy(tmp_test_script.name, test_script_path)
+        
+        # Set test script data in session
+        audit_session_store.set_test_script(
+            session_id=session_id,
+            filename=test_script.filename,
+            controls=controls
+        )
+        
+        # Build evidence checklist
+        evidence_checklist = []
+        for control in controls:
+            evidence_checklist.append({
+                "control_id": control.get("control_id"),
+                "control_description": control.get("control_description", "")[:150],
+                "evidence_required": control.get("evidence_required", ""),
+                "status": "pending"
+            })
+        
+        logger.info(f"[{rid}] Created audit session {session_id} with {len(controls)} controls")
+        
+        return AuditStartResponse(
+            session_id=session_id,
+            status="awaiting_evidence",
+            controls_found=len(controls),
+            evidence_checklist=evidence_checklist,
+            message=f"Test script parsed successfully. Please upload evidence files for {len(controls)} controls.",
+            warnings=warnings if warnings else None
+        )
+    
+    except HTTPException:
+        raise
+    
+    except Exception as e:
+        logger.error(f"[{rid}] Audit start failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, {"error": str(e), "request_id": rid})
+    
+    finally:
+        if tmp_test_script:
+            try:
+                os.unlink(tmp_test_script.name)
+            except:
+                pass
+
+
+@app.post("/audit/upload-evidence", tags=["audit"], response_model=EvidenceUploadResponse)
+async def audit_upload_evidence(
+    session_id: str = Form(...),
+    evidence_files: List[UploadFile] = File(...)
+):
+    """
+    Upload evidence files for an audit session.
+    Validates files and maps them to controls.
+    """
+    rid = _req_id()
+    logger.info(f"[{rid}] POST /audit/upload-evidence - session={session_id}, files={len(evidence_files)}")
+    
+    # Get session
+    session = audit_session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(404, {"error": "Session not found", "request_id": rid})
+    
+    if session["status"] == "complete":
+        raise HTTPException(400, {"error": "Session already completed", "request_id": rid})
+    
+    model = session["model"]
+    session_dir = audit_session_store.get_session_temp_dir(session_id)
+    evidence_dir = session_dir / "evidence"
+    
+    files_processed = []
+    
+    try:
+        # Get pending controls
+        pending_controls = audit_session_store.get_pending_controls(session_id)
+        
+        # Process each file
+        for evidence_file in evidence_files:
+            # Validate file
+            errs = _validate_upload(evidence_file)
+            if errs:
+                files_processed.append({
+                    "filename": evidence_file.filename,
+                    "validation_status": "rejected",
+                    "reason": "; ".join(errs)
+                })
+                continue
+            
+            # Save file to evidence directory
+            file_path = evidence_dir / evidence_file.filename
+            with open(file_path, "wb") as f:
+                f.write(evidence_file.file.read())
+            
+            # Validate evidence
+            validation_result = validate_evidence_file(
+                file_path=str(file_path),
+                filename=evidence_file.filename,
+                pending_controls=pending_controls,
+                model=model
+            )
+            
+            # Add to session
+            audit_session_store.add_uploaded_file(
+                session_id=session_id,
+                filename=evidence_file.filename,
+                tmp_path=str(file_path),
+                file_size=file_path.stat().st_size,
+                validation_result=validation_result
+            )
+            
+            # Build response for this file
+            files_processed.append({
+                "filename": evidence_file.filename,
+                "validation_status": validation_result["validation_status"],
+                "content_type_detected": validation_result.get("content_type_detected"),
+                "satisfies_controls": validation_result.get("satisfies_controls", []),
+                "reason": validation_result.get("rejection_reason") or "File accepted"
+            })
+        
+        # Get updated session state
+        session = audit_session_store.get_session(session_id)
+        evidence_summary = audit_session_store.get_evidence_summary(session_id)
+        pending_controls_updated = audit_session_store.get_pending_controls(session_id)
+        ready_to_generate = evidence_summary["pending"] == 0
+        
+        message = f"Processed {len(files_processed)} files. "
+        if ready_to_generate:
+            message += "All evidence received. Ready to generate workpaper."
+        else:
+            message += f"{evidence_summary['pending']} controls still need evidence."
+        
+        logger.info(f"[{rid}] Evidence upload complete. {evidence_summary['received']}/{evidence_summary['total_controls']} received")
+        
+        return EvidenceUploadResponse(
+            session_id=session_id,
+            status=session["status"],
+            files_processed=files_processed,
+            evidence_summary=evidence_summary,
+            pending_controls=pending_controls_updated,
+            ready_to_generate=ready_to_generate,
+            message=message
+        )
+    
+    except HTTPException:
+        raise
+    
+    except Exception as e:
+        logger.error(f"[{rid}] Evidence upload failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, {"error": str(e), "request_id": rid})
+
+
+@app.post("/audit/generate-workpaper", tags=["audit"], response_model=WorkpaperResponse)
+async def audit_generate_workpaper(
+    session_id: str = Form(...),
+    force_generate: bool = Form(False)
+):
+    """
+    Generate workpaper from analyzed evidence.
+    Set force_generate=True to generate even with missing evidence.
+    """
+    rid = _req_id()
+    logger.info(f"[{rid}] POST /audit/generate-workpaper - session={session_id}, force={force_generate}")
+    
+    # Get session
+    session = audit_session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(404, {"error": "Session not found", "request_id": rid})
+    
+    # Check if evidence is complete
+    evidence_summary = audit_session_store.get_evidence_summary(session_id)
+    pending_controls = audit_session_store.get_pending_controls(session_id)
+    
+    if evidence_summary["pending"] > 0 and not force_generate:
+        raise HTTPException(400, {
+            "error": "Incomplete evidence",
+            "message": f"{evidence_summary['pending']} controls still need evidence. Set force_generate=true to proceed anyway.",
+            "pending_controls": pending_controls,
+            "request_id": rid
+        })
+    
+    try:
+        # Load knowledge bases
+        # Initialize embeddings for loading vectorstores
+        base_url = os.getenv('OLLAMA_BASE_URL', 'http://ollama:11434')
+        embed_name = os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
+        embeddings_for_load = OllamaEmbeddings(model=embed_name, base_url=base_url)
+
+        kb1_path = os.getenv("KB1_PATH", "saved_global_vectorstore")
+        kb2_path = os.getenv("KB2_PATH", "saved_company_vectorstore")
+        
+        logger.info(f"[{rid}] Loading KBs: {kb1_path}, {kb2_path}")
+        
+        # Try to load KBs from disk
+        kb1_vectorstore = None
+        kb2_vectorstore = None
+        
+        try:
+            kb1_vectorstore = load_faiss_vectorstore(kb1_path, embeddings_for_load)  # ✅ Now correct            
+            logger.info(f"[{rid}] Loaded KB1 from {kb1_path}")
+        except Exception as e:
+            logger.warning(f"[{rid}] Could not load KB1: {e}")
+        
+        try:
+            kb2_vectorstore = load_faiss_vectorstore(kb2_path, embeddings_for_load)  # ✅ Now correct
+            logger.info(f"[{rid}] Loaded KB2 from {kb2_path}")
+        except Exception as e:
+            logger.warning(f"[{rid}] Could not load KB2: {e}")
+        
+        # Analyze all controls
+        model = session["model"]
+        
+        logger.info(f"[{rid}] Starting analysis of {len(session['controls'])} controls")
+        
+        analysis_results = analyze_all_controls(
+            session_data=session,
+            kb1_vectorstore=kb1_vectorstore,
+            kb2_vectorstore=kb2_vectorstore,
+            model=model
+        )
+        
+        logger.info(f"[{rid}] Analysis complete. Generating workpaper.")
+        
+        # Generate summary
+        summary = generate_overall_summary(analysis_results)
+        
+        # Fill workpaper template
+        template_path = Path(__file__).parent / "utils" / "Consolidated_WP_Template.xlsx"
+        session_dir = audit_session_store.get_session_temp_dir(session_id)
+        output_dir = session_dir / "output"
+        
+        workpaper_filename = f"workpaper_{session_id}.xlsx"
+        workpaper_path = output_dir / workpaper_filename
+        
+        fill_workpaper_template(
+            template_path=str(template_path),
+            output_path=str(workpaper_path),
+            session_data=session,
+            analysis_results=analysis_results
+        )
+        
+        logger.info(f"[{rid}] Workpaper generated: {workpaper_path}")
+        
+        # Mark session complete
+        audit_session_store.mark_analysis_complete(
+            session_id=session_id,
+            workpaper_path=str(workpaper_path),
+            pdf_path=None
+        )
+        
+        # Build download URL
+        download_url = f"/audit/download/{session_id}/{workpaper_filename}"
+        
+        return WorkpaperResponse(
+            session_id=session_id,
+            status="complete",
+            workpaper_filename=workpaper_filename,
+            pdf_filename=None,
+            summary=summary,
+            download_url=download_url,
+            message=f"Workpaper generated successfully. {summary['controls_tested']} controls tested, {summary['pass_count']} passed."
+        )
+    
+    except HTTPException:
+        raise
+    
+    except Exception as e:
+        logger.error(f"[{rid}] Workpaper generation failed: {e}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(500, {"error": str(e), "request_id": rid, "traceback": traceback.format_exc()})
+
+
+@app.get("/audit/download/{session_id}/{filename}", tags=["audit"])
+async def audit_download_file(session_id: str, filename: str):
+    """Download generated workpaper file."""
+    session = audit_session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    
+    session_dir = audit_session_store.get_session_temp_dir(session_id)
+    file_path = session_dir / "output" / filename
+    
+    if not file_path.exists():
+        raise HTTPException(404, "File not found")
+    
+    return FileResponse(
+        path=str(file_path),
+        filename=filename,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+
+@app.delete("/audit/session/{session_id}", tags=["audit"])
+async def audit_clear_session(session_id: str):
+    """Clear audit session and delete temp files."""
+    session = audit_session_store.get_session(session_id)
+    if not session:
+        raise HTTPException(404, "Session not found")
+    
+    audit_session_store.clear_session(session_id)
+    
+    return {"message": f"Session {session_id} cleared", "success": True}
 
 # ----------------------------------------------------------------------------
 # Run with:  uvicorn api.main:app --reload

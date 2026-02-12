@@ -1,1053 +1,1534 @@
 """
-Risk Control Matrix (RCM) Compliance Analysis - Backend Engine
-Pure backend logic for analyzing RCM compliance against regulatory frameworks.
-No API code - that belongs in rcm_api.py
+RCM Compliance Analyzer
+Analyzes organization's Risk Control Matrix (RCM) against regulatory requirements.
+Updated to handle multi-sheet Excel format with:
+- Sheet 1: Company Controls
+- Sheet 2: Company-CISM Controls
+
+Format:
+- Control Reference (e.g., A.5.1.1, C-CISM-4.1)
+- Control Title
+- Control Description
+- Domain
+- Sub Domain
 """
 
 import os
-import json
-import re
-import numpy as np
+import openpyxl
+from typing import List, Dict, Any, Optional
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
-from collections import defaultdict
+import logging
 from datetime import datetime
 
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_EMBEDDING_MODEL = os.getenv('OLLAMA_EMBEDDING_MODEL', 'nomic-embed-text:latest')
-# ------------------------------------------------------------------
-# LAZY IMPORTS - Optimize Docker build time
-# ------------------------------------------------------------------
-def get_ollama_llm(model: str, temperature: float = 0.1):
+logger = logging.getLogger(__name__)
+
+# Lazy load LLM
+_llm_cache = None
+
+def get_llm(model: str):
     """Lazy load Ollama LLM."""
-    from langchain_community.llms import Ollama
-    return Ollama(
-        model=model, 
-        base_url=OLLAMA_BASE_URL, 
-        temperature=temperature
-    )
+    global _llm_cache
+    if _llm_cache is None or _llm_cache[0] != model:
+        from langchain_community.llms import Ollama
+        ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+        _llm_cache = (model, Ollama(model=model, base_url=ollama_url, temperature=0.1))
+    return _llm_cache[1]
 
 
-def get_ollama_embeddings(model: str = OLLAMA_EMBEDDING_MODEL):
-    """Lazy load Ollama embeddings."""
-    from langchain_community.embeddings import OllamaEmbeddings
-    return OllamaEmbeddings(
-        model=model, 
-        base_url=OLLAMA_BASE_URL
+# ============================================================================
+# BACKWARD COMPATIBILITY FUNCTIONS
+# (Keep these for existing code that imports from rcm_compliance_analyzer)
+# ============================================================================
+
+def load_document(file_path: str, filename: str = None) -> List[Any]:
+    """
+    Load document from file path (backward compatible).
+    
+    Args:
+        file_path: Path to document file
+        filename: Optional filename
+    
+    Returns:
+        List of loaded documents with page_content attribute
+    """
+    from langchain_community.document_loaders import (
+        PyPDFLoader, TextLoader, UnstructuredMarkdownLoader, CSVLoader
     )
+    from langchain.schema import Document
+    
+    ext = Path(file_path).suffix.lower()
+    
+    try:
+        if ext == '.pdf':
+            loader = PyPDFLoader(file_path)
+            return loader.load()
+        elif ext == '.txt':
+            loader = TextLoader(file_path)
+            return loader.load()
+        elif ext == '.md':
+            loader = UnstructuredMarkdownLoader(file_path)
+            return loader.load()
+        elif ext == '.csv':
+            loader = CSVLoader(file_path)
+            return loader.load()
+        elif ext in ['.xlsx', '.xls']:
+            # For Excel files, parse as RCM and create Document objects
+            logger.info(f"Loading Excel file as RCM: {file_path}")
+            
+            try:
+                rcm_controls = parse_rcm_excel(file_path)
+                documents = []
+                
+                # Create a Document object for each control
+                for sheet_name, controls in rcm_controls.items():
+                    for ctrl in controls:
+                        # Build page_content from control information
+                        page_content = f"""Control Reference: {ctrl.get('reference', 'N/A')}
+Control Title: {ctrl.get('title', 'N/A')}
+Control Description: {ctrl.get('description', 'N/A')}
+Domain: {ctrl.get('domain', 'N/A')}
+Sub Domain: {ctrl.get('subdomain', 'N/A')}
+Sheet: {sheet_name}"""
+                        
+                        # Create Document with metadata
+                        doc = Document(
+                            page_content=page_content,
+                            metadata={
+                                'source': filename or file_path,
+                                'sheet': sheet_name,
+                                'control_id': ctrl.get('reference'),
+                                'control_title': ctrl.get('title'),
+                                'domain': ctrl.get('domain'),
+                                'type': 'rcm_control'
+                            }
+                        )
+                        documents.append(doc)
+                
+                logger.info(f"Created {len(documents)} Document objects from Excel RCM")
+                return documents
+                
+            except Exception as e:
+                logger.error(f"Failed to parse Excel as RCM: {e}")
+                # Fallback: create a single document with error info
+                return [Document(
+                    page_content=f"Excel file: {filename or file_path}\nParsing failed: {str(e)}",
+                    metadata={'source': filename or file_path, 'type': 'excel', 'error': str(e)}
+                )]
+        else:
+            raise ValueError(f"Unsupported file type: {ext}")
+        
+    except Exception as e:
+        logger.error(f"Failed to load document {file_path}: {e}")
+        raise
 
 
 def get_text_splitter():
-    """Lazy load text splitter."""
+    """Get text splitter for chunking documents (backward compatible)."""
     from langchain.text_splitter import RecursiveCharacterTextSplitter
+    
     return RecursiveCharacterTextSplitter(
-        chunk_size=int(os.getenv("CHUNK_SIZE", "3000")),
-        chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "600")),
-        separators=["\n\n", "\n", ". ", " ", ""]
+        chunk_size=1000,
+        chunk_overlap=200,
+        length_function=len
     )
 
 
-def get_cosine_similarity():
-    """Lazy load cosine similarity function."""
-    from sklearn.metrics.pairwise import cosine_similarity
-    return cosine_similarity
-
-
-def load_document(file_path: str, filename: str):
-    """Load document using appropriate loader."""
-    from langchain_community.document_loaders import PyPDFLoader, TextLoader
-    
-    try:
-        if file_path.endswith(".pdf"):
-            loader = PyPDFLoader(file_path)
-        elif file_path.endswith((".txt", ".md")):
-            loader = TextLoader(file_path)
-        else:
-            raise ValueError(f"Unsupported file format: {file_path}")
-        
-        docs = loader.load()
-        for doc in docs:
-            doc.metadata["source"] = filename
-        
-        return docs
-    except Exception as e:
-        print(f"[ERROR] Failed to load {filename}: {e}")
-        return []
-
-
-# ------------------------------------------------------------------
-# CONFIG
-# ------------------------------------------------------------------
-SIM_THRESHOLD = float(os.getenv("SIM_THRESHOLD", "0.68"))
-COMPLIANCE_THRESHOLD = float(os.getenv("COMPLIANCE_THRESHOLD", "0.75"))  # 75% match = compliant
-
-# Control domains with risk categories
-RISK_CONTROL_DOMAINS = {
-    "governance": {
-        "keywords": ["governance", "board", "committee", "oversight", "management"],
-        "risk_category": "Strategic Risk"
-    },
-    "access_control": {
-        "keywords": ["access", "authentication", "authorization", "mfa", "privilege"],
-        "risk_category": "Security Risk"
-    },
-    "data_protection": {
-        "keywords": ["data loss", "dlp", "encryption", "confidentiality", "privacy"],
-        "risk_category": "Data Risk"
-    },
-    "network_security": {
-        "keywords": ["network", "firewall", "segmentation", "intrusion", "perimeter"],
-        "risk_category": "Infrastructure Risk"
-    },
-    "incident_response": {
-        "keywords": ["incident", "breach", "response", "recovery", "forensic"],
-        "risk_category": "Operational Risk"
-    },
-    "business_continuity": {
-        "keywords": ["continuity", "disaster recovery", "bcp", "dr", "resilience"],
-        "risk_category": "Operational Risk"
-    },
-    "third_party": {
-        "keywords": ["vendor", "third party", "outsourcing", "supplier", "service provider"],
-        "risk_category": "Third Party Risk"
-    },
-    "change_management": {
-        "keywords": ["change", "patch", "update", "deployment", "release"],
-        "risk_category": "Operational Risk"
-    },
-    "vulnerability_management": {
-        "keywords": ["vulnerability", "penetration", "assessment", "scanning", "patching"],
-        "risk_category": "Security Risk"
-    },
-    "compliance": {
-        "keywords": ["compliance", "regulatory", "audit", "legal", "standard"],
-        "risk_category": "Compliance Risk"
-    },
-    "application_security": {
-        "keywords": ["application", "software", "code", "development", "sdlc"],
-        "risk_category": "Security Risk"
-    },
-    "cloud_security": {
-        "keywords": ["cloud", "saas", "iaas", "paas", "multi-tenant"],
-        "risk_category": "Infrastructure Risk"
-    }
-}
-
-
-# ------------------------------------------------------------------
-# UTILITY FUNCTIONS
-# ------------------------------------------------------------------
-def safe_json_loads(llm_output: str, default=None):
-    """Safely extract JSON from LLM output."""
-    if not llm_output or not llm_output.strip():
-        return default
-
-    llm_output = llm_output.strip()
-    llm_output = re.sub(r"```json|```", "", llm_output, flags=re.IGNORECASE).strip()
-
-    try:
-        return json.loads(llm_output)
-    except json.JSONDecodeError:
-        pass
-
-    match = re.search(r"[\[{].*[\]}]", llm_output, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
-
-    return default
-
-
-def classify_domain(text: str) -> Tuple[str, str]:
-    """Classify control into domain and risk category."""
-    text_lower = text.lower()
-    scores = defaultdict(int)
-    
-    for domain, config in RISK_CONTROL_DOMAINS.items():
-        for keyword in config["keywords"]:
-            if keyword in text_lower:
-                scores[domain] += 1
-    
-    if not scores:
-        return "general", "Operational Risk"
-    
-    best_domain = max(scores.items(), key=lambda x: x[1])[0]
-    risk_category = RISK_CONTROL_DOMAINS[best_domain]["risk_category"]
-    
-    return best_domain, risk_category
-
-
-# ------------------------------------------------------------------
-# REGULATORY REQUIREMENT EXTRACTOR
-# ------------------------------------------------------------------
 class RegulatoryRequirementExtractor:
-    """Extracts requirements from regulatory documents."""
+    """Extract regulatory requirements from documents (backward compatible)."""
     
-    def __init__(self, model: str):
-        self.model = model
-
-    def run(self, chunks: List) -> List[Dict]:
-        """Extract regulatory requirements."""
-        llm = get_ollama_llm(self.model, temperature=0.1)
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self.llm = get_llm(model_name)
+    
+    def extract(self, documents: List[Any]) -> List[Dict[str, Any]]:
+        """Extract requirements from documents."""
         requirements = []
         
-        print(f"[INFO] Extracting regulatory requirements from {len(chunks)} chunks")
-        
-        for i in range(0, len(chunks), 5):  # Batch processing
-            batch = chunks[i:i + 5]
-            batch_text = "\n\n---CHUNK---\n\n".join([c.page_content[:1000] for c in batch])
-            
-            prompt = f"""Extract all technology risk control REQUIREMENTS from regulatory text.
-
-For each requirement, return JSON object:
-{{
-  "requirement_id": "unique_id",
-  "requirement_statement": "exact requirement text",
-  "control_domain": "governance|access_control|data_protection|network_security|incident_response|business_continuity|third_party|change_management|vulnerability_management|compliance|application_security|cloud_security",
-  "risk_addressed": "specific risk this requirement mitigates",
-  "mandatory": true/false,
-  "frequency": "if specified (e.g., 'annually', 'quarterly', 'continuous')",
-  "metrics": ["measurable criteria if any"],
-  "enforcement_keywords": ["shall", "must", "should", "may"],
-  "applicable_to": "who must comply (e.g., 'all financial institutions', 'banks')"
-}}
-
-Return JSON array. If none found, return [].
-
-TEXT:
-{batch_text}
-
-Return ONLY JSON array:"""
-
+        for idx, doc in enumerate(documents[:10]):  # Limit to 10 docs
             try:
-                raw = llm.invoke(prompt)
-                parsed = safe_json_loads(raw, default=[])
+                content = doc.page_content if hasattr(doc, 'page_content') else str(doc)
                 
-                if not isinstance(parsed, list):
-                    parsed = []
+                prompt = f"""Extract regulatory requirements from this document.
                 
-                for req in parsed:
-                    req["source_document"] = batch[0].metadata["source"]
-                    
-                    # Auto-classify if needed
-                    if not req.get("control_domain"):
-                        domain, risk_cat = classify_domain(req.get("requirement_statement", ""))
-                        req["control_domain"] = domain
-                        req["risk_category"] = risk_cat
-                    else:
-                        req["risk_category"] = RISK_CONTROL_DOMAINS.get(
-                            req["control_domain"], {}
-                        ).get("risk_category", "Operational Risk")
-                    
-                    requirements.append(req)
-                    
+Document excerpt:
+{content[:1000]}
+
+List the key requirements, controls, or obligations.
+Format: One requirement per line, starting with "REQ:"
+"""
+                
+                response = self.llm.invoke(prompt)
+                
+                # Parse requirements
+                for line in response.split('\n'):
+                    if line.strip().startswith('REQ:'):
+                        req_text = line.replace('REQ:', '').strip()
+                        if req_text:
+                            requirements.append({
+                                'text': req_text,
+                                'source_doc': idx,
+                                'type': 'regulatory_requirement'
+                            })
+                
             except Exception as e:
-                print(f"[WARN] Batch {i} requirement extraction failed: {e}")
-                continue
-            
-            if i % 25 == 0:
-                print(f"[INFO] Processed {i}/{len(chunks)} chunks, {len(requirements)} requirements")
+                logger.error(f"Failed to extract from doc {idx}: {e}")
         
-        print(f"[INFO] Extracted {len(requirements)} regulatory requirements")
         return requirements
-
-
-# ------------------------------------------------------------------
-# RCM CONTROL EXTRACTOR
-# ------------------------------------------------------------------
-class RCMControlExtractor:
-    """Extracts controls from organization's RCM."""
     
-    def __init__(self, model: str):
-        self.model = model
+    def run(self, documents: List[Any]) -> List[Dict[str, Any]]:
+        """Alias for extract() method (backward compatible)."""
+        return self.extract(documents)
 
-    def run(self, chunks: List) -> List[Dict]:
-        """Extract RCM controls."""
-        llm = get_ollama_llm(self.model, temperature=0.1)
+
+class RCMControlExtractor:
+    """Extract controls from RCM documents (backward compatible)."""
+    
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self.llm = get_llm(model_name)
+    
+    def extract(self, documents: List[Any]) -> List[Dict[str, Any]]:
+        """Extract controls from RCM documents."""
         controls = []
         
-        print(f"[INFO] Extracting RCM controls from {len(chunks)} chunks")
-        
-        for i in range(0, len(chunks), 3):
-            batch = chunks[i:i + 3]
-            batch_text = "\n\n---CHUNK---\n\n".join([c.page_content[:1200] for c in batch])
-            
-            prompt = f"""Extract EXISTING CONTROLS from Risk Control Matrix (RCM).
-
-For each control, return JSON object:
-{{
-  "control_id": "control reference/ID from RCM",
-  "control_name": "control name/title",
-  "control_description": "what the control does",
-  "control_domain": "governance|access_control|data_protection|network_security|incident_response|business_continuity|third_party|change_management|vulnerability_management|compliance|application_security|cloud_security",
-  "risk_addressed": "risk this control mitigates",
-  "control_type": "preventive|detective|corrective",
-  "implementation_status": "implemented|partially_implemented|not_implemented|planned",
-  "frequency": "how often executed (e.g., 'daily', 'monthly', 'continuous')",
-  "owner": "control owner (role/department)",
-  "evidence": "evidence of implementation",
-  "testing_frequency": "how often tested",
-  "last_tested": "last test date if mentioned",
-  "effectiveness_rating": "if mentioned (e.g., 'effective', 'needs improvement')"
-}}
-
-Return JSON array. If none found, return [].
-
-RCM TEXT:
-{batch_text}
-
-Return ONLY JSON array:"""
-
+        for doc in documents:
             try:
-                raw = llm.invoke(prompt)
-                parsed = safe_json_loads(raw, default=[])
+                # Check if document has metadata indicating it's from Excel
+                if hasattr(doc, 'metadata') and doc.metadata.get('type') == 'rcm_control':
+                    # Already parsed Excel control - extract from metadata and content
+                    controls.append({
+                        'control_id': doc.metadata.get('control_id', 'N/A'),
+                        'title': doc.metadata.get('control_title', 'N/A'),
+                        'description': doc.page_content.split('Control Description:')[1].split('\n')[0].strip() if 'Control Description:' in doc.page_content else '',
+                        'domain': doc.metadata.get('domain', 'N/A'),
+                        'subdomain': doc.metadata.get('subdomain', ''),
+                        'sheet': doc.metadata.get('sheet', ''),
+                        'type': 'rcm_control'
+                    })
+                else:
+                    # Parse text-based RCM using LLM
+                    content = doc.page_content if hasattr(doc, 'page_content') else str(doc)
+                    
+                    prompt = f"""Extract control information from this RCM document.
+
+Document excerpt:
+{content[:1000]}
+
+List the controls with their IDs, titles, and descriptions.
+Format: CONTROL_ID: [id] | TITLE: [title] | DESC: [description]
+"""
+                    
+                    response = self.llm.invoke(prompt)
+                    
+                    # Parse controls (simple extraction)
+                    for line in response.split('\n'):
+                        if 'CONTROL_ID:' in line:
+                            try:
+                                parts = line.split('|')
+                                ctrl_id = parts[0].split('CONTROL_ID:')[1].strip() if len(parts) > 0 else ''
+                                title = parts[1].split('TITLE:')[1].strip() if len(parts) > 1 else ''
+                                desc = parts[2].split('DESC:')[1].strip() if len(parts) > 2 else ''
+                                
+                                if ctrl_id:
+                                    controls.append({
+                                        'control_id': ctrl_id,
+                                        'title': title,
+                                        'description': desc,
+                                        'type': 'rcm_control'
+                                    })
+                            except:
+                                pass
                 
-                if not isinstance(parsed, list):
-                    parsed = []
-                
-                for control in parsed:
-                    control["source_document"] = batch[0].metadata["source"]
-                    
-                    # Auto-classify domain
-                    if not control.get("control_domain"):
-                        domain, risk_cat = classify_domain(
-                            control.get("control_description", "") + " " + 
-                            control.get("control_name", "")
-                        )
-                        control["control_domain"] = domain
-                        control["risk_category"] = risk_cat
-                    else:
-                        control["risk_category"] = RISK_CONTROL_DOMAINS.get(
-                            control["control_domain"], {}
-                        ).get("risk_category", "Operational Risk")
-                    
-                    controls.append(control)
-                    
             except Exception as e:
-                print(f"[WARN] Batch {i} RCM extraction failed: {e}")
-                continue
-            
-            if i % 15 == 0:
-                print(f"[INFO] Processed {i}/{len(chunks)} chunks, {len(controls)} controls")
+                logger.error(f"Failed to extract controls from document: {e}")
         
-        print(f"[INFO] Extracted {len(controls)} RCM controls")
+        logger.info(f"Extracted {len(controls)} total controls")
         return controls
-
-
-# ------------------------------------------------------------------
-# COMPLIANCE ANALYZER
-# ------------------------------------------------------------------
-class ComplianceAnalyzer:
-    """Analyzes compliance gaps between RCM and regulatory requirements."""
     
-    def __init__(self, model: str):
-        self.model = model
-        self.embedder = get_ollama_embeddings()
+    def run(self, documents: List[Any]) -> List[Dict[str, Any]]:
+        """Alias for extract() method (backward compatible)."""
+        return self.extract(documents)
 
-    def analyze_compliance(
-        self, 
-        regulatory_requirements: List[Dict], 
-        rcm_controls: List[Dict]
-    ) -> Dict:
-        """
-        Analyze compliance and identify gaps.
-        """
-        print(f"[INFO] Analyzing compliance: {len(regulatory_requirements)} requirements vs {len(rcm_controls)} controls")
-        
-        # Group by domain
-        requirements_by_domain = defaultdict(list)
-        controls_by_domain = defaultdict(list)
-        
-        for req in regulatory_requirements:
-            requirements_by_domain[req["control_domain"]].append(req)
-        
-        for ctrl in rcm_controls:
-            controls_by_domain[ctrl["control_domain"]].append(ctrl)
-        
-        # Analyze each domain
-        domain_analyses = {}
-        all_gaps = []
-        all_compliant = []
-        all_partial = []
-        
-        for domain in set(list(requirements_by_domain.keys()) + list(controls_by_domain.keys())):
-            domain_reqs = requirements_by_domain.get(domain, [])
-            domain_ctrls = controls_by_domain.get(domain, [])
-            
-            print(f"[INFO] Analyzing domain: {domain} ({len(domain_reqs)} reqs, {len(domain_ctrls)} controls)")
-            
-            domain_result = self._analyze_domain(domain, domain_reqs, domain_ctrls)
-            domain_analyses[domain] = domain_result
-            
-            all_gaps.extend(domain_result["gaps"])
-            all_compliant.extend(domain_result["compliant_requirements"])
-            all_partial.extend(domain_result["partially_compliant"])
-        
-        # Calculate overall metrics
-        total_requirements = len(regulatory_requirements)
-        compliant_count = len(all_compliant)
-        partial_count = len(all_partial)
-        gap_count = len(all_gaps)
-        
-        compliance_percentage = round((compliant_count / total_requirements * 100), 2) if total_requirements > 0 else 0
-        
-        return {
-            "domain_analyses": domain_analyses,
-            "overall_metrics": {
-                "total_requirements": total_requirements,
-                "total_controls": len(rcm_controls),
-                "compliant_requirements": compliant_count,
-                "partially_compliant": partial_count,
-                "gap_requirements": gap_count,
-                "compliance_percentage": compliance_percentage,
-                "risk_score": self._calculate_risk_score(all_gaps)
-            },
-            "gaps": all_gaps,
-            "compliant": all_compliant,
-            "partial": all_partial
-        }
 
-    def _analyze_domain(
-        self, 
-        domain: str, 
-        requirements: List[Dict], 
-        controls: List[Dict]
-    ) -> Dict:
-        """Analyze compliance for a specific domain."""
+class ComplianceAnalyzer:
+    """Analyze compliance between RCM and regulatory requirements (backward compatible)."""
+    
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self.llm = get_llm(model_name)
+    
+    def analyze(self, rcm_controls: List[Dict], reg_requirements: List[Dict]) -> List[Dict]:
+        """Analyze compliance (simple list output)."""
+        results = []
         
-        if not requirements:
-            return {
-                "domain": domain,
-                "requirement_count": 0,
-                "control_count": len(controls),
-                "compliance_status": "N/A - No requirements",
-                "gaps": [],
-                "compliant_requirements": [],
-                "partially_compliant": [],
-                "recommendations": []
-            }
-        
-        if not controls:
-            # All requirements are gaps
-            gaps = [{
-                "requirement": req,
-                "gap_type": "missing_control",
-                "severity": "high" if req.get("mandatory", False) else "medium",
-                "matched_controls": [],
-                "coverage_percentage": 0
-            } for req in requirements]
+        for ctrl in rcm_controls[:50]:  # Limit for performance
+            prompt = f"""Analyze if this control meets the regulatory requirements.
+
+Control: {ctrl.get('control_id')} - {ctrl.get('title')}
+Description: {ctrl.get('description', '')}
+
+Requirements:
+{chr(10).join([f"- {r.get('text', '')[:200]}" for r in reg_requirements[:5]])}
+
+Status: COMPLIANT / PARTIAL / NON-COMPLIANT
+Gaps: [list gaps]
+"""
             
-            return {
-                "domain": domain,
-                "requirement_count": len(requirements),
-                "control_count": 0,
-                "compliance_status": "Non-Compliant",
-                "compliance_percentage": 0,
-                "gaps": gaps,
-                "compliant_requirements": [],
-                "partially_compliant": [],
-                "recommendations": self._generate_domain_recommendations(domain, gaps, [])
+            try:
+                response = self.llm.invoke(prompt)
+                
+                status = 'UNKNOWN'
+                if 'COMPLIANT' in response:
+                    status = 'COMPLIANT'
+                elif 'PARTIAL' in response:
+                    status = 'PARTIAL'
+                elif 'NON-COMPLIANT' in response:
+                    status = 'NON-COMPLIANT'
+                
+                results.append({
+                    'control_id': ctrl.get('control_id'),
+                    'control_title': ctrl.get('title'),
+                    'status': status,
+                    'analysis': response[:300]
+                })
+                
+            except Exception as e:
+                logger.error(f"Analysis failed for {ctrl.get('control_id')}: {e}")
+        
+        return results
+    
+    def analyze_compliance(self, requirements: List[Dict], controls: List[Dict]) -> Dict[str, Any]:
+        """
+        Comprehensive compliance analysis with structured output.
+        
+        Args:
+            requirements: List of regulatory requirements
+            controls: List of RCM controls
+        
+        Returns:
+            {
+                'compliance_stats': {...},
+                'gaps': [...],
+                'domain_analyses': {...},
+                'detailed_results': [...],
+                'risk_level': 'HIGH/MEDIUM/LOW'
             }
+        """
+        logger.info(f"Analyzing compliance for {len(controls)} controls against {len(requirements)} requirements")
         
-        # Match requirements to controls using embeddings
-        matches = self._match_requirements_to_controls(requirements, controls)
-        
+        detailed_results = []
         gaps = []
-        compliant = []
-        partial = []
+        domain_data = {}
         
-        for req, matched_controls, similarity in matches:
-            if not matched_controls or similarity < 0.5:
-                # No match - gap
-                gaps.append({
-                    "requirement": req,
-                    "gap_type": "missing_control",
-                    "severity": "high" if req.get("mandatory", False) else "medium",
-                    "matched_controls": [],
-                    "coverage_percentage": 0,
-                    "similarity_score": similarity
-                })
-            elif similarity >= COMPLIANCE_THRESHOLD:
-                # Good match - compliant
-                compliant.append({
-                    "requirement": req,
-                    "matched_controls": matched_controls,
-                    "coverage_percentage": round(similarity * 100, 1),
-                    "status": "compliant"
-                })
-            else:
-                # Partial match - needs improvement
-                partial.append({
-                    "requirement": req,
-                    "gap_type": "partial_coverage",
-                    "severity": "medium",
-                    "matched_controls": matched_controls,
-                    "coverage_percentage": round(similarity * 100, 1),
-                    "similarity_score": similarity
+        # Analyze each control
+        for ctrl in controls[:50]:  # Limit for performance
+            control_id = ctrl.get('control_id', 'N/A')
+            control_title = ctrl.get('title', 'N/A')
+            control_desc = ctrl.get('description', '')
+            domain = ctrl.get('domain', 'Unknown')
+            
+            # Build analysis prompt
+            req_text = '\n'.join([f"- {r.get('text', '')[:150]}" for r in requirements[:5]])
+            
+            prompt = f"""Analyze compliance for this control against regulatory requirements.
+
+Control ID: {control_id}
+Control: {control_title}
+Description: {control_desc}
+
+Regulatory Requirements:
+{req_text}
+
+Provide:
+1. Status: COMPLIANT / PARTIAL / NON-COMPLIANT / UNABLE_TO_ASSESS
+2. Compliance Score: 0-100
+3. Gaps: What's missing or inadequate
+4. Impact: HIGH / MEDIUM / LOW
+
+Keep response structured and concise.
+"""
+            
+            try:
+                response = self.llm.invoke(prompt)
+                
+                # Parse status
+                status = 'UNABLE_TO_ASSESS'
+                if 'COMPLIANT' in response and 'NON-COMPLIANT' not in response:
+                    status = 'COMPLIANT'
+                elif 'PARTIAL' in response:
+                    status = 'PARTIAL'
+                elif 'NON-COMPLIANT' in response:
+                    status = 'NON-COMPLIANT'
+                
+                # Parse score (look for numbers)
+                score = 50
+                import re
+                score_match = re.search(r'Score:?\s*(\d+)', response, re.IGNORECASE)
+                if score_match:
+                    score = min(100, max(0, int(score_match.group(1))))
+                elif status == 'COMPLIANT':
+                    score = 90
+                elif status == 'PARTIAL':
+                    score = 60
+                elif status == 'NON-COMPLIANT':
+                    score = 30
+                
+                # Parse impact
+                impact = 'MEDIUM'
+                if 'HIGH' in response.upper():
+                    impact = 'HIGH'
+                elif 'LOW' in response.upper():
+                    impact = 'LOW'
+                
+                # Extract gaps
+                gap_text = ''
+                if 'Gaps:' in response:
+                    gap_text = response.split('Gaps:')[1].split('\n')[0].strip()
+                elif status != 'COMPLIANT':
+                    gap_text = response[:200]
+                
+                # Store detailed result
+                result = {
+                    'control_id': control_id,
+                    'control_title': control_title,
+                    'control_description': control_desc[:150],
+                    'domain': domain,
+                    'status': status,
+                    'compliance_score': score,
+                    'analysis': response[:400],
+                    'impact': impact
+                }
+                detailed_results.append(result)
+                
+                # Track gaps
+                if status in ['PARTIAL', 'NON-COMPLIANT']:
+                    gaps.append({
+                        'control_id': control_id,
+                        'control': control_title,
+                        'domain': domain,
+                        'gap': gap_text or f"{status}: {response[:150]}",
+                        'impact': impact,
+                        'status': status
+                    })
+                
+                # Organize by domain
+                if domain not in domain_data:
+                    domain_data[domain] = {
+                        'controls': [],
+                        'total_controls': 0,
+                        'compliant': 0,
+                        'partial': 0,
+                        'non_compliant': 0,
+                        'avg_score': 0,
+                        'findings': []
+                    }
+                
+                domain_data[domain]['controls'].append(result)
+                domain_data[domain]['total_controls'] += 1
+                
+                if status == 'COMPLIANT':
+                    domain_data[domain]['compliant'] += 1
+                elif status == 'PARTIAL':
+                    domain_data[domain]['partial'] += 1
+                elif status == 'NON-COMPLIANT':
+                    domain_data[domain]['non_compliant'] += 1
+                
+            except Exception as e:
+                logger.error(f"Analysis failed for {control_id}: {e}")
+                detailed_results.append({
+                    'control_id': control_id,
+                    'control_title': control_title,
+                    'status': 'ERROR',
+                    'analysis': f"Analysis error: {str(e)[:100]}",
+                    'compliance_score': 0
                 })
         
-        compliance_pct = round((len(compliant) / len(requirements) * 100), 2) if requirements else 0
+        # Calculate overall stats
+        total = len(detailed_results)
+        compliant = sum(1 for r in detailed_results if r.get('status') == 'COMPLIANT')
+        partial = sum(1 for r in detailed_results if r.get('status') == 'PARTIAL')
+        non_compliant = sum(1 for r in detailed_results if r.get('status') == 'NON-COMPLIANT')
+        unable = sum(1 for r in detailed_results if r.get('status') == 'UNABLE_TO_ASSESS')
+        errors = sum(1 for r in detailed_results if r.get('status') == 'ERROR')
+        
+        # Average compliance score
+        scores = [r.get('compliance_score', 0) for r in detailed_results if r.get('compliance_score')]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        
+        # Calculate domain averages
+        for domain, data in domain_data.items():
+            domain_scores = [c.get('compliance_score', 0) for c in data['controls']]
+            data['avg_score'] = sum(domain_scores) / len(domain_scores) if domain_scores else 0
+            
+            # Add findings
+            data['findings'] = [
+                {
+                    'control_id': c['control_id'],
+                    'status': c['status'],
+                    'summary': c['analysis'][:150]
+                }
+                for c in data['controls'][:5]  # Top 5 findings per domain
+            ]
+        
+        # Determine overall risk level
+        if avg_score >= 80:
+            risk_level = 'LOW'
+        elif avg_score >= 60:
+            risk_level = 'MEDIUM'
+        else:
+            risk_level = 'HIGH'
         
         return {
-            "domain": domain,
-            "requirement_count": len(requirements),
-            "control_count": len(controls),
-            "compliance_status": self._get_compliance_status(compliance_pct),
-            "compliance_percentage": compliance_pct,
-            "gaps": gaps,
-            "compliant_requirements": compliant,
-            "partially_compliant": partial,
-            "recommendations": self._generate_domain_recommendations(domain, gaps, partial)
+            'compliance_stats': {
+                'total': total,
+                'compliant': compliant,
+                'partial': partial,
+                'non_compliant': non_compliant,
+                'unable_to_assess': unable,
+                'errors': errors,
+                'compliance_rate': (compliant / total * 100) if total > 0 else 0,
+                'avg_compliance_score': round(avg_score, 2)
+            },
+            'gaps': gaps,
+            'domain_analyses': domain_data,
+            'detailed_results': detailed_results,
+            'risk_level': risk_level
         }
 
-    def _match_requirements_to_controls(
-        self, 
-        requirements: List[Dict], 
-        controls: List[Dict]
-    ) -> List[Tuple[Dict, List[Dict], float]]:
-        """Match requirements to controls using semantic similarity."""
+
+class RemediationSuggester:
+    """Suggest remediations for gaps (backward compatible)."""
+    
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+        self.llm = get_llm(model_name)
+    
+    def suggest(self, compliance_results: List[Dict]) -> List[Dict]:
+        """Suggest remediations."""
+        suggestions = []
         
-        if not requirements or not controls:
-            return [(req, [], 0.0) for req in requirements]
+        non_compliant = [r for r in compliance_results if r.get('status') == 'NON-COMPLIANT']
+        
+        for result in non_compliant[:10]:
+            prompt = f"""Suggest remediation for this gap:
+
+Control: {result.get('control_id')}
+Issue: {result.get('analysis', '')}
+
+Provide specific, actionable steps to achieve compliance.
+"""
+            
+            try:
+                response = self.llm.invoke(prompt)
+                
+                suggestions.append({
+                    'control_id': result.get('control_id'),
+                    'recommendation': response[:300]
+                })
+                
+            except Exception as e:
+                logger.error(f"Remediation suggestion failed: {e}")
+        
+        return suggestions
+    
+    def generate_suggestions(self, gaps: List[Dict], domain_analyses: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate comprehensive remediation suggestions (backward compatible)."""
+        
+        all_suggestions = []
+        priority_suggestions = []
+        domain_suggestions = {}
+        
+        # Process gaps
+        for gap in gaps[:20]:  # Limit to 20 for performance
+            prompt = f"""Provide remediation for this compliance gap:
+
+Control ID: {gap.get('control_id', 'N/A')}
+Control: {gap.get('control', 'N/A')}
+Gap: {gap.get('gap', 'N/A')}
+Impact: {gap.get('impact', 'MEDIUM')}
+
+Provide:
+1. Specific remediation steps
+2. Priority (HIGH/MEDIUM/LOW)
+3. Estimated effort
+4. Resources needed
+
+Keep response concise.
+"""
+            
+            try:
+                response = self.llm.invoke(prompt)
+                
+                # Parse priority
+                priority = 'MEDIUM'
+                if 'HIGH' in response.upper():
+                    priority = 'HIGH'
+                elif 'LOW' in response.upper():
+                    priority = 'LOW'
+                
+                suggestion = {
+                    'control_id': gap.get('control_id'),
+                    'control': gap.get('control', ''),
+                    'gap': gap.get('gap', ''),
+                    'remediation': response[:500],
+                    'priority': priority,
+                    'domain': gap.get('domain', 'Unknown')
+                }
+                
+                all_suggestions.append(suggestion)
+                
+                if priority == 'HIGH':
+                    priority_suggestions.append(suggestion)
+                
+                # Group by domain
+                domain = gap.get('domain', 'Unknown')
+                if domain not in domain_suggestions:
+                    domain_suggestions[domain] = []
+                domain_suggestions[domain].append(suggestion)
+                
+            except Exception as e:
+                logger.error(f"Failed to generate suggestion: {e}")
+        
+        return {
+            'all_suggestions': all_suggestions,
+            'priority_suggestions': priority_suggestions,
+            'domain_suggestions': domain_suggestions,
+            'total_suggestions': len(all_suggestions),
+            'high_priority_count': len(priority_suggestions)
+        }
+    
+    def generate_suggestions(self, gaps: List[Any], domain_analyses: Dict[str, Any]) -> Dict[str, List[Dict]]:
+        """
+        Generate remediation suggestions organized by domain.
+        
+        Args:
+            gaps: List of identified gaps
+            domain_analyses: Domain-specific analysis results
+        
+        Returns:
+            Dict mapping domain names to lists of suggestions
+        """
+        suggestions_by_domain = {}
         
         try:
-            # Create embeddings
-            req_texts = [req.get("requirement_statement", "") for req in requirements]
-            ctrl_texts = [
-                ctrl.get("control_description", "") + " " + ctrl.get("control_name", "") 
-                for ctrl in controls
-            ]
-            
-            req_embeddings = np.array(self.embedder.embed_documents(req_texts))
-            ctrl_embeddings = np.array(self.embedder.embed_documents(ctrl_texts))
-            
-            # Calculate similarities
-            cosine_sim = get_cosine_similarity()
-            similarities = cosine_sim(req_embeddings, ctrl_embeddings)
-            
-            # Match each requirement
-            matches = []
-            for i, req in enumerate(requirements):
-                # Find controls above threshold
-                matched_indices = np.where(similarities[i] >= 0.5)[0]
-                matched_controls = [controls[j] for j in matched_indices]
+            # Process domain analyses
+            for domain, analysis in domain_analyses.items():
+                domain_suggestions = []
                 
-                # Best similarity score
-                best_similarity = float(np.max(similarities[i])) if len(similarities[i]) > 0 else 0.0
+                # Get gaps for this domain
+                domain_gaps = analysis.get('gaps', []) if isinstance(analysis, dict) else []
                 
-                matches.append((req, matched_controls, best_similarity))
+                for gap in domain_gaps[:5]:  # Limit to 5 per domain
+                    try:
+                        gap_text = gap if isinstance(gap, str) else gap.get('description', str(gap))
+                        
+                        prompt = f"""Provide remediation for this compliance gap:
+
+Domain: {domain}
+Gap: {gap_text}
+
+Provide:
+1. Root cause
+2. Specific remediation steps
+3. Priority (HIGH/MEDIUM/LOW)
+4. Estimated effort
+
+Keep response concise (max 200 words).
+"""
+                        
+                        response = self.llm.invoke(prompt)
+                        
+                        # Parse priority
+                        priority = 'MEDIUM'
+                        if 'HIGH' in response.upper():
+                            priority = 'HIGH'
+                        elif 'LOW' in response.upper():
+                            priority = 'LOW'
+                        
+                        domain_suggestions.append({
+                            'gap': gap_text[:200],
+                            'recommendation': response[:400],
+                            'priority': priority,
+                            'domain': domain
+                        })
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to generate suggestion for gap in {domain}: {e}")
+                
+                if domain_suggestions:
+                    suggestions_by_domain[domain] = domain_suggestions
             
-            return matches
+            # Also process general gaps not in domain analyses
+            if gaps and not domain_analyses:
+                general_suggestions = []
+                
+                for gap in gaps[:10]:
+                    try:
+                        gap_text = gap if isinstance(gap, str) else str(gap)
+                        
+                        prompt = f"""Provide remediation for this gap: {gap_text}
+
+Provide specific, actionable steps.
+"""
+                        response = self.llm.invoke(prompt)
+                        
+                        general_suggestions.append({
+                            'gap': gap_text[:200],
+                            'recommendation': response[:300]
+                        })
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to generate suggestion: {e}")
+                
+                if general_suggestions:
+                    suggestions_by_domain['General'] = general_suggestions
             
         except Exception as e:
-            print(f"[WARN] Matching failed: {e}")
-            return [(req, [], 0.0) for req in requirements]
-
-    def _calculate_risk_score(self, gaps: List[Dict]) -> str:
-        """Calculate overall risk score based on gaps."""
-        if not gaps:
-            return "Low"
+            logger.error(f"Suggestion generation failed: {e}")
         
-        high_severity = sum(1 for g in gaps if g.get("severity") == "high")
-        total_gaps = len(gaps)
-        
-        if high_severity >= 10 or total_gaps >= 20:
-            return "Critical"
-        elif high_severity >= 5 or total_gaps >= 10:
-            return "High"
-        elif total_gaps >= 5:
-            return "Medium"
-        else:
-            return "Low"
-
-    def _get_compliance_status(self, percentage: float) -> str:
-        """Get compliance status from percentage."""
-        if percentage >= 90:
-            return "Compliant"
-        elif percentage >= 75:
-            return "Largely Compliant"
-        elif percentage >= 50:
-            return "Partially Compliant"
-        else:
-            return "Non-Compliant"
-
-    def _generate_domain_recommendations(
-        self, 
-        domain: str, 
-        gaps: List[Dict], 
-        partial: List[Dict]
-    ) -> List[Dict]:
-        """Generate improvement recommendations for a domain."""
-        recommendations = []
-        
-        # High priority gaps
-        high_priority_gaps = [g for g in gaps if g.get("severity") == "high"]
-        if high_priority_gaps:
-            recommendations.append({
-                "priority": "Critical",
-                "recommendation": f"Implement controls for {len(high_priority_gaps)} mandatory requirements in {domain}",
-                "affected_requirements": [g["requirement"]["requirement_statement"][:100] + "..." for g in high_priority_gaps[:3]],
-                "estimated_effort": "High"
-            })
-        
-        # Partial coverage improvements
-        if partial:
-            recommendations.append({
-                "priority": "High",
-                "recommendation": f"Enhance {len(partial)} partially compliant controls in {domain}",
-                "affected_requirements": [p["requirement"]["requirement_statement"][:100] + "..." for p in partial[:3]],
-                "estimated_effort": "Medium"
-            })
-        
-        return recommendations
+        return suggestions_by_domain
 
 
-# ------------------------------------------------------------------
-# REMEDIATION SUGGESTER
-# ------------------------------------------------------------------
-class RemediationSuggester:
-    """Generates detailed remediation suggestions for gaps."""
+class ComplianceReportGenerator:
+    """Generate compliance reports (backward compatible)."""
     
-    def __init__(self, model: str):
-        self.model = model
-
-    def generate_suggestions(
-        self, 
-        gaps: List[Dict], 
-        domain_analyses: Dict
-    ) -> Dict[str, List[Dict]]:
-        """Generate remediation suggestions for all gaps."""
+    def __init__(self, model_name: str):
+        self.model_name = model_name
+    
+    def generate(self, 
+                 rcm_controls: List[Dict],
+                 compliance_results: List[Dict],
+                 remediations: List[Dict]) -> str:
+        """Generate report."""
         
-        llm = get_ollama_llm(self.model, temperature=0.3)
+        report = []
+        report.append("=" * 80)
+        report.append("RCM COMPLIANCE REPORT")
+        report.append("=" * 80)
+        report.append(f"\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
-        suggestions_by_domain = defaultdict(list)
+        # Summary
+        total = len(compliance_results)
+        compliant = sum(1 for r in compliance_results if r.get('status') == 'COMPLIANT')
+        partial = sum(1 for r in compliance_results if r.get('status') == 'PARTIAL')
+        non_compliant = sum(1 for r in compliance_results if r.get('status') == 'NON-COMPLIANT')
         
-        # Group gaps by domain
-        gaps_by_domain = defaultdict(list)
-        for gap in gaps:
-            domain = gap["requirement"].get("control_domain", "general")
-            gaps_by_domain[domain].append(gap)
+        report.append(f"\n\nTotal Controls: {total}")
+        report.append(f"Compliant: {compliant}")
+        report.append(f"Partially Compliant: {partial}")
+        report.append(f"Non-Compliant: {non_compliant}")
         
-        # Generate suggestions per domain
-        for domain, domain_gaps in gaps_by_domain.items():
-            print(f"[INFO] Generating remediation for {domain}: {len(domain_gaps)} gaps")
+        # Details
+        report.append("\n\n" + "=" * 80)
+        report.append("DETAILED RESULTS")
+        report.append("=" * 80)
+        
+        for result in compliance_results:
+            report.append(f"\n{result.get('control_id')}: {result.get('status')}")
+            report.append(f"  {result.get('analysis', '')[:200]}")
+        
+        # Remediations
+        if remediations:
+            report.append("\n\n" + "=" * 80)
+            report.append("REMEDIATION RECOMMENDATIONS")
+            report.append("=" * 80)
             
-            # Batch process gaps
-            for i in range(0, len(domain_gaps), 3):
-                batch_gaps = domain_gaps[i:i+3]
+            for rem in remediations:
+                report.append(f"\n{rem.get('control_id')}:")
+                report.append(f"  {rem.get('recommendation', '')[:200]}")
+        
+        report.append("\n\n" + "=" * 80)
+        report.append("END OF REPORT")
+        report.append("=" * 80)
+        
+        return "\n".join(report)
+    
+    def generate_executive_summary(self, analysis: Dict[str, Any], suggestions: Dict[str, Any]) -> str:
+        """Generate executive summary (backward compatible)."""
+        
+        summary = []
+        summary.append("=" * 80)
+        summary.append("EXECUTIVE SUMMARY")
+        summary.append("=" * 80)
+        summary.append(f"\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        
+        # Overall metrics
+        summary.append("OVERALL COMPLIANCE STATUS")
+        summary.append("-" * 80)
+        
+        compliance_stats = analysis.get('compliance_stats', {})
+        total = compliance_stats.get('total', 0)
+        compliant = compliance_stats.get('compliant', 0)
+        partial = compliance_stats.get('partial', 0)
+        non_compliant = compliance_stats.get('non_compliant', 0)
+        
+        if total > 0:
+            compliance_rate = (compliant / total) * 100
+            summary.append(f"Total Controls Analyzed: {total}")
+            summary.append(f"Compliant: {compliant} ({compliant/total*100:.1f}%)")
+            summary.append(f"Partially Compliant: {partial} ({partial/total*100:.1f}%)")
+            summary.append(f"Non-Compliant: {non_compliant} ({non_compliant/total*100:.1f}%)")
+            summary.append(f"\nOverall Compliance Rate: {compliance_rate:.1f}%")
+        
+        # Risk assessment
+        summary.append("\n\nRISK ASSESSMENT")
+        summary.append("-" * 80)
+        
+        risk_level = analysis.get('risk_level', 'MEDIUM')
+        summary.append(f"Overall Risk Level: {risk_level}")
+        
+        gaps = analysis.get('gaps', [])
+        if gaps:
+            high_risk_gaps = [g for g in gaps if g.get('impact') == 'HIGH']
+            summary.append(f"Critical Gaps: {len(high_risk_gaps)}")
+            summary.append(f"Total Gaps: {len(gaps)}")
+        
+        # Remediation overview
+        summary.append("\n\nREMEDIATION OVERVIEW")
+        summary.append("-" * 80)
+        
+        total_suggestions = suggestions.get('total_suggestions', 0)
+        high_priority = suggestions.get('high_priority_count', 0)
+        
+        summary.append(f"Total Remediation Actions: {total_suggestions}")
+        summary.append(f"High Priority Actions: {high_priority}")
+        
+        # Priority actions
+        if suggestions.get('priority_suggestions'):
+            summary.append("\n\nTOP PRIORITY ACTIONS")
+            summary.append("-" * 80)
+            
+            for idx, sug in enumerate(suggestions['priority_suggestions'][:5], 1):
+                summary.append(f"\n{idx}. {sug.get('control_id')} - {sug.get('control', '')[:60]}")
+                summary.append(f"   Gap: {sug.get('gap', '')[:100]}")
+                summary.append(f"   Action: {sug.get('remediation', '')[:150]}")
+        
+        summary.append("\n\n" + "=" * 80)
+        
+        return "\n".join(summary)
+    
+    def generate_domain_report(self, domain: str, domain_analysis: Dict[str, Any], domain_suggestions: List[Dict]) -> str:
+        """Generate domain-specific report (backward compatible)."""
+        
+        report = []
+        report.append("=" * 80)
+        report.append(f"DOMAIN REPORT: {domain}")
+        report.append("=" * 80)
+        report.append(f"\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        
+        # Domain statistics
+        report.append("DOMAIN STATISTICS")
+        report.append("-" * 80)
+        
+        total_controls = domain_analysis.get('total_controls', 0)
+        compliant = domain_analysis.get('compliant', 0)
+        non_compliant = domain_analysis.get('non_compliant', 0)
+        
+        report.append(f"Total Controls: {total_controls}")
+        if total_controls > 0:
+            report.append(f"Compliant: {compliant} ({compliant/total_controls*100:.1f}%)")
+            report.append(f"Non-Compliant: {non_compliant} ({non_compliant/total_controls*100:.1f}%)")
+        
+        # Key findings
+        report.append("\n\nKEY FINDINGS")
+        report.append("-" * 80)
+        
+        findings = domain_analysis.get('findings', [])
+        if findings:
+            for idx, finding in enumerate(findings[:5], 1):
+                report.append(f"\n{idx}. {finding.get('control_id')}: {finding.get('status')}")
+                report.append(f"   {finding.get('summary', '')[:200]}")
+        else:
+            report.append("No specific findings for this domain.")
+        
+        # Remediation actions
+        if domain_suggestions:
+            report.append("\n\nREMEDIATION ACTIONS")
+            report.append("-" * 80)
+            
+            for idx, sug in enumerate(domain_suggestions[:10], 1):
+                report.append(f"\n{idx}. {sug.get('control_id')}")
+                report.append(f"   Gap: {sug.get('gap', '')[:150]}")
+                report.append(f"   Remediation: {sug.get('remediation', '')[:200]}")
+                report.append(f"   Priority: {sug.get('priority', 'MEDIUM')}")
+        
+        report.append("\n\n" + "=" * 80)
+        
+        return "\n".join(report)
+    
+    def generate_executive_summary(self, analysis: Dict[str, Any], suggestions: Dict[str, List[Dict]]) -> str:
+        """
+        Generate executive summary.
+        
+        Args:
+            analysis: Compliance analysis results
+            suggestions: Remediation suggestions by domain
+        
+        Returns:
+            Executive summary text
+        """
+        summary = []
+        summary.append("=" * 80)
+        summary.append("EXECUTIVE SUMMARY - RCM COMPLIANCE ANALYSIS")
+        summary.append("=" * 80)
+        summary.append(f"\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Overall metrics
+        summary.append("\n\nOVERALL COMPLIANCE STATUS")
+        summary.append("-" * 80)
+        
+        overall_score = analysis.get('overall_compliance_score', 0)
+        total_controls = analysis.get('total_controls', 0)
+        compliant_count = analysis.get('compliant_controls', 0)
+        
+        summary.append(f"Total Controls Analyzed: {total_controls}")
+        summary.append(f"Overall Compliance Score: {overall_score:.1f}%")
+        summary.append(f"Compliant Controls: {compliant_count}")
+        
+        # Risk assessment
+        summary.append("\n\nRISK ASSESSMENT")
+        summary.append("-" * 80)
+        
+        risk_level = analysis.get('risk_level', 'UNKNOWN')
+        summary.append(f"Risk Level: {risk_level}")
+        
+        # Key findings
+        summary.append("\n\nKEY FINDINGS")
+        summary.append("-" * 80)
+        
+        gaps = analysis.get('gaps', [])
+        if gaps:
+            summary.append(f"\nTotal Gaps Identified: {len(gaps)}")
+            summary.append("\nTop Critical Gaps:")
+            for idx, gap in enumerate(gaps[:5], 1):
+                gap_text = gap if isinstance(gap, str) else gap.get('description', str(gap))
+                summary.append(f"  {idx}. {gap_text[:150]}")
+        else:
+            summary.append("\nNo critical gaps identified.")
+        
+        # Remediation overview
+        summary.append("\n\nREMEDIATION RECOMMENDATIONS")
+        summary.append("-" * 80)
+        
+        total_suggestions = sum(len(suggs) for suggs in suggestions.values())
+        summary.append(f"\nTotal Recommendations: {total_suggestions}")
+        
+        if suggestions:
+            summary.append("\nBy Domain:")
+            for domain, suggs in suggestions.items():
+                summary.append(f"  - {domain}: {len(suggs)} recommendations")
+        
+        # Domain summary
+        domain_analyses = analysis.get('domain_analyses', {})
+        if domain_analyses:
+            summary.append("\n\nDOMAIN COMPLIANCE SUMMARY")
+            summary.append("-" * 80)
+            
+            for domain, domain_data in domain_analyses.items():
+                if isinstance(domain_data, dict):
+                    domain_score = domain_data.get('compliance_score', 0)
+                    summary.append(f"\n{domain}: {domain_score:.1f}%")
+        
+        summary.append("\n\n" + "=" * 80)
+        summary.append("END OF EXECUTIVE SUMMARY")
+        summary.append("=" * 80)
+        
+        return "\n".join(summary)
+    
+    def generate_domain_report(self, domain: str, domain_analysis: Dict[str, Any], domain_suggestions: List[Dict]) -> str:
+        """
+        Generate domain-specific report.
+        
+        Args:
+            domain: Domain name
+            domain_analysis: Analysis results for this domain
+            domain_suggestions: Remediation suggestions for this domain
+        
+        Returns:
+            Domain report text
+        """
+        report = []
+        report.append("=" * 80)
+        report.append(f"DOMAIN REPORT: {domain.upper()}")
+        report.append("=" * 80)
+        report.append(f"\nGenerated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # Domain metrics
+        report.append("\n\nDOMAIN METRICS")
+        report.append("-" * 80)
+        
+        if isinstance(domain_analysis, dict):
+            total_controls = domain_analysis.get('total_controls', 0)
+            compliant = domain_analysis.get('compliant_controls', 0)
+            compliance_score = domain_analysis.get('compliance_score', 0)
+            
+            report.append(f"Total Controls: {total_controls}")
+            report.append(f"Compliant Controls: {compliant}")
+            report.append(f"Compliance Score: {compliance_score:.1f}%")
+            
+            # Gaps
+            gaps = domain_analysis.get('gaps', [])
+            if gaps:
+                report.append(f"\n\nIDENTIFIED GAPS ({len(gaps)})")
+                report.append("-" * 80)
                 
-                gap_descriptions = []
-                for idx, gap in enumerate(batch_gaps):
-                    req = gap["requirement"]
-                    gap_descriptions.append(
-                        f"{idx+1}. Requirement: {req.get('requirement_statement', '')[:200]}\n"
-                        f"   Gap Type: {gap.get('gap_type', 'unknown')}\n"
-                        f"   Severity: {gap.get('severity', 'unknown')}"
-                    )
+                for idx, gap in enumerate(gaps[:10], 1):
+                    gap_text = gap if isinstance(gap, str) else gap.get('description', str(gap))
+                    report.append(f"\n{idx}. {gap_text}")
+        
+        # Recommendations
+        if domain_suggestions:
+            report.append(f"\n\nRECOMMENDATIONS ({len(domain_suggestions)})")
+            report.append("-" * 80)
+            
+            for idx, suggestion in enumerate(domain_suggestions, 1):
+                report.append(f"\n{idx}. Gap: {suggestion.get('gap', 'N/A')[:100]}")
+                report.append(f"   Priority: {suggestion.get('priority', 'MEDIUM')}")
+                report.append(f"   Recommendation: {suggestion.get('recommendation', 'N/A')[:200]}")
+        
+        report.append("\n\n" + "=" * 80)
+        report.append(f"END OF {domain.upper()} REPORT")
+        report.append("=" * 80)
+        
+        return "\n".join(report)
+
+
+# ============================================================================
+# MAIN RCM COMPLIANCE FUNCTIONS (Updated for Excel)
+# ============================================================================
+
+
+def parse_rcm_excel(file_path: str) -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Parse RCM Excel file with multiple sheets.
+    
+    Expected format:
+    - Row 1: Headers (Control Reference, Control Title, Control Description, Domain, Sub Domain)
+    - Row 2+: Control data
+    
+    Args:
+        file_path: Path to Excel file
+    
+    Returns:
+        Dict with sheet names as keys and list of controls as values
+    """
+    logger.info(f"Parsing RCM Excel file: {file_path}")
+    
+    try:
+        wb = openpyxl.load_workbook(file_path, data_only=True)
+        all_controls = {}
+        
+        for sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+            logger.info(f"Processing sheet: {sheet_name}")
+            
+            # Find header row (usually row 1)
+            headers = []
+            for cell in ws[1]:
+                if cell.value:
+                    headers.append(str(cell.value).strip())
+                else:
+                    headers.append(None)
+            
+            logger.info(f"Headers found: {headers}")
+            
+            # Map expected columns (flexible matching)
+            col_map = {}
+            for idx, header in enumerate(headers):
+                if not header:
+                    continue
+                    
+                header_lower = header.lower()
                 
-                prompt = f"""You are a cybersecurity compliance consultant. Generate detailed remediation suggestions.
+                if 'control reference' in header_lower or 'control ref' in header_lower:
+                    col_map['reference'] = idx
+                elif 'control title' in header_lower or 'title' in header_lower:
+                    col_map['title'] = idx
+                elif 'control description' in header_lower or 'description' in header_lower:
+                    col_map['description'] = idx
+                elif header_lower == 'domain':
+                    col_map['domain'] = idx
+                elif 'sub domain' in header_lower or 'subdomain' in header_lower or 'sub-domain' in header_lower:
+                    col_map['subdomain'] = idx
+            
+            logger.info(f"Column mapping: {col_map}")
+            
+            # Validate required columns
+            if 'reference' not in col_map:
+                logger.warning(f"Sheet {sheet_name}: Missing 'Control Reference' column, skipping")
+                continue
+            
+            # Extract controls (skip header row)
+            controls = []
+            for row_idx in range(2, ws.max_row + 1):
+                row = ws[row_idx]
+                
+                # Build control dict
+                control = {
+                    'sheet': sheet_name,
+                    'row': row_idx
+                }
+                
+                # Extract mapped columns
+                for field, col_idx in col_map.items():
+                    if col_idx < len(row):
+                        value = row[col_idx].value
+                        if value:
+                            # Clean up text (remove extra whitespace, newlines)
+                            control[field] = str(value).strip().replace('\n', ' ')
+                
+                # Only include rows with at least a reference
+                if 'reference' in control and control['reference']:
+                    controls.append(control)
+            
+            all_controls[sheet_name] = controls
+            logger.info(f"Extracted {len(controls)} controls from {sheet_name}")
+        
+        # Log summary
+        total = sum(len(controls) for controls in all_controls.values())
+        logger.info(f"Total controls extracted: {total} across {len(all_controls)} sheets")
+        
+        return all_controls
+        
+    except Exception as e:
+        logger.error(f"Failed to parse RCM Excel: {e}")
+        raise ValueError(f"RCM Excel parsing failed: {e}")
+
+
+def analyze_rcm_compliance(
+    rcm_file_path: str,
+    regulatory_docs: List[str],
+    model_name: str,
+    regulatory_vectorstores: Optional[List[Any]] = None
+) -> Dict[str, Any]:
+
+    logger.info("Starting Enhanced RCM compliance analysis")
+
+    try:
+        # -----------------------------
+        # STEP 1 – Parse RCM
+        # -----------------------------
+        rcm_controls_by_sheet = parse_rcm_excel(rcm_file_path)
+
+        all_controls = []
+        for sheet_name, controls in rcm_controls_by_sheet.items():
+            for ctrl in controls:
+                ctrl["sheet"] = sheet_name
+                all_controls.append(ctrl)
+
+        if not all_controls:
+            raise ValueError("No controls found in RCM file.")
+
+        # -----------------------------
+        # STEP 2 – Extract Regulatory Obligations
+        # -----------------------------
+        llm = get_llm(model_name)
+
+        regulatory_obligations = []
+
+        from langchain_community.document_loaders import (
+            PyPDFLoader, TextLoader, UnstructuredMarkdownLoader
+        )
+
+        for reg_doc_path in regulatory_docs:
+
+            ext = Path(reg_doc_path).suffix.lower()
+
+            if ext == ".pdf":
+                loader = PyPDFLoader(reg_doc_path)
+            elif ext in [".txt", ".md"]:
+                loader = TextLoader(reg_doc_path)
+            else:
+                continue
+
+            docs = loader.load()
+
+            full_text = "\n".join([d.page_content for d in docs])[:12000]
+
+            prompt = f"""
+You are a regulatory compliance expert.
+
+Extract ONLY enforceable regulatory requirements or obligations.
+
+Ignore background text.
+
+Return STRICT JSON list format:
+[
+  {{
+    "requirement": "...",
+    "domain": "...",
+    "criticality": "HIGH/MEDIUM/LOW"
+  }}
+]
+
+Text:
+{full_text}
+"""
+
+            response = llm.invoke(prompt)
+
+            try:
+                import json
+                extracted = json.loads(response)
+                for item in extracted:
+                    item["source"] = Path(reg_doc_path).name
+                    regulatory_obligations.append(item)
+            except Exception:
+                logger.warning("Failed to parse structured obligations from LLM output.")
+
+        if not regulatory_obligations:
+            raise ValueError("No regulatory obligations extracted.")
+
+        # -----------------------------
+        # STEP 3 – Group By Domain
+        # -----------------------------
+        from collections import defaultdict
+
+        obligations_by_domain = defaultdict(list)
+        controls_by_domain = defaultdict(list)
+
+        for req in regulatory_obligations:
+            domain = req.get("domain", "General")
+            obligations_by_domain[domain].append(req)
+
+        for ctrl in all_controls:
+            domain = ctrl.get("domain", "General")
+            controls_by_domain[domain].append(ctrl)
+
+        # -----------------------------
+        # STEP 4 – Domain Level Analysis
+        # -----------------------------
+        compliance_results = []
+
+        domain_scores = {}
+
+        for domain, requirements in obligations_by_domain.items():
+
+            controls = controls_by_domain.get(domain, [])
+
+            req_text = "\n".join(
+                [f"- {r['requirement']}" for r in requirements]
+            )
+
+            ctrl_text = "\n".join(
+                [f"- {c.get('reference')} : {c.get('description','')}"
+                 for c in controls]
+            )
+
+            prompt = f"""
+You are a senior IT auditor.
 
 Domain: {domain}
 
-Gaps identified:
-{chr(10).join(gap_descriptions)}
+Regulatory Requirements:
+{req_text}
 
-For EACH gap, provide remediation suggestion as JSON:
+RCM Controls:
+{ctrl_text}
+
+Tasks:
+1. Map requirements to controls.
+2. Identify missing requirements.
+3. Identify weak or partial controls.
+4. Calculate compliance score (0-100).
+5. Provide remediation recommendations.
+
+Return STRICT JSON:
 {{
-  "gap_number": 1,
-  "control_to_implement": "specific control name",
-  "implementation_steps": ["step 1", "step 2", "step 3"],
-  "responsible_party": "who should implement (role)",
-  "estimated_timeline": "timeframe",
-  "resources_needed": ["resource 1", "resource 2"],
-  "industry_best_practices": ["practice 1", "practice 2"],
-  "tools_or_solutions": ["tool/solution suggestions"],
-  "success_metrics": ["how to measure success"],
-  "priority": "Critical|High|Medium|Low"
+  "score": 0-100,
+  "missing_requirements": [],
+  "weak_controls": [],
+  "recommendations": []
 }}
-
-Return JSON array with suggestions:"""
-
-                try:
-                    raw = llm.invoke(prompt)
-                    parsed = safe_json_loads(raw, default=[])
-                    
-                    if not isinstance(parsed, list):
-                        parsed = []
-                    
-                    # Match suggestions to gaps
-                    for idx, suggestion in enumerate(parsed):
-                        if idx < len(batch_gaps):
-                            gap_with_suggestion = {
-                                **batch_gaps[idx],
-                                "remediation": suggestion
-                            }
-                            suggestions_by_domain[domain].append(gap_with_suggestion)
-                    
-                except Exception as e:
-                    print(f"[WARN] Remediation generation failed for {domain} batch {i}: {e}")
-                    # Add gaps without suggestions
-                    for gap in batch_gaps:
-                        gap_with_suggestion = {
-                            **gap,
-                            "remediation": {
-                                "control_to_implement": "Implement control to address requirement",
-                                "priority": gap.get("severity", "medium").title()
-                            }
-                        }
-                        suggestions_by_domain[domain].append(gap_with_suggestion)
-        
-        return dict(suggestions_by_domain)
-
-
-# ------------------------------------------------------------------
-# REPORT GENERATOR
-# ------------------------------------------------------------------
-class ComplianceReportGenerator:
-    """Generates comprehensive compliance reports."""
-    
-    def __init__(self, model: str):
-        self.model = model
-
-    def generate_executive_summary(
-        self, 
-        compliance_analysis: Dict,
-        remediation_suggestions: Dict
-    ) -> str:
-        """Generate executive summary."""
-        
-        llm = get_ollama_llm(self.model, temperature=0.2)
-        
-        metrics = compliance_analysis["overall_metrics"]
-        
-        prompt = f"""Generate an executive summary for RCM compliance analysis.
-
-Overall Metrics:
-- Total Regulatory Requirements: {metrics['total_requirements']}
-- Total RCM Controls: {metrics['total_controls']}
-- Compliance Percentage: {metrics['compliance_percentage']}%
-- Compliant Requirements: {metrics['compliant_requirements']}
-- Gap Requirements: {metrics['gap_requirements']}
-- Risk Score: {metrics['risk_score']}
-
-Total Remediation Items: {sum(len(v) for v in remediation_suggestions.values())}
-
-Create a concise executive summary covering:
-1. Overall compliance status (2-3 sentences)
-2. Key findings (3-4 bullet points)
-3. Critical gaps (top 3)
-4. Recommended immediate actions (3 items)
-5. Overall risk assessment
-
-Format in markdown. Be professional and concise."""
-
-        try:
-            return llm.invoke(prompt)
-        except Exception as e:
-            return f"# Executive Summary\n\nCompliance Rate: {metrics['compliance_percentage']}%\nRisk Score: {metrics['risk_score']}\n\nError generating detailed summary: {e}"
-
-    def generate_domain_report(
-        self, 
-        domain: str, 
-        domain_analysis: Dict,
-        domain_suggestions: List[Dict]
-    ) -> str:
-        """Generate detailed report for a domain."""
-        
-        llm = get_ollama_llm(self.model, temperature=0.2)
-        
-        prompt = f"""Generate detailed compliance report for domain: {domain}
-
-Domain Analysis:
-- Requirements: {domain_analysis['requirement_count']}
-- Controls: {domain_analysis['control_count']}
-- Compliance Status: {domain_analysis['compliance_status']}
-- Compliance %: {domain_analysis.get('compliance_percentage', 'N/A')}
-- Gaps: {len(domain_analysis['gaps'])}
-- Partially Compliant: {len(domain_analysis['partially_compliant'])}
-
-Remediation items: {len(domain_suggestions)}
-
-Create a detailed domain report in markdown with:
-
-## {domain.replace('_', ' ').title()}
-
-### Compliance Status
-[Overall status and percentage]
-
-### Key Findings
-[3-5 bullet points]
-
-### Gaps Identified
-[Summarize gap types and severity]
-
-### Compliance Strengths
-[What's working well]
-
-### Improvement Areas
-[What needs attention]
-
-### Priority Actions
-[Top 3 immediate actions with timeline]
-
-Be specific and actionable."""
-
-        try:
-            return llm.invoke(prompt)
-        except Exception as e:
-            return f"## {domain}\n\nCompliance: {domain_analysis.get('compliance_percentage', 'N/A')}%\n\nError: {e}"
-
-    def generate_full_report(
-        self,
-        regulatory_docs: List[str],
-        rcm_doc: str,
-        compliance_analysis: Dict,
-        remediation_suggestions: Dict
-    ) -> str:
-        """Generate complete compliance report."""
-        
-        print("[INFO] Generating comprehensive compliance report")
-        
-        # Executive summary
-        exec_summary = self.generate_executive_summary(compliance_analysis, remediation_suggestions)
-        
-        # Domain reports
-        domain_reports = []
-        for domain, analysis in compliance_analysis["domain_analyses"].items():
-            suggestions = remediation_suggestions.get(domain, [])
-            report = self.generate_domain_report(domain, analysis, suggestions)
-            domain_reports.append(report)
-        
-        # Compile full report
-        report = f"""# Risk Control Matrix (RCM) Compliance Analysis Report
-
-**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-
-**Regulatory Frameworks Analyzed:**
-{chr(10).join(f"- {doc}" for doc in regulatory_docs)}
-
-**Organization's RCM:**
-- {rcm_doc}
-
----
-
-{exec_summary}
-
----
-
-# Detailed Domain Analysis
-
-{chr(10).join(domain_reports)}
-
----
-
-# Remediation Action Plan
-
-## Summary by Priority
-
 """
-        
-        # Add remediation summary
-        all_suggestions = [s for domain_list in remediation_suggestions.values() for s in domain_list]
-        
-        by_priority = defaultdict(list)
-        for sugg in all_suggestions:
-            priority = sugg.get("remediation", {}).get("priority", "Medium")
-            by_priority[priority].append(sugg)
-        
-        for priority in ["Critical", "High", "Medium", "Low"]:
-            if priority in by_priority:
-                count = len(by_priority[priority])
-                report += f"\n### {priority} Priority ({count} items)\n\n"
-                
-                for i, sugg in enumerate(by_priority[priority][:5], 1):  # Top 5
-                    req_stmt = sugg["requirement"]["requirement_statement"][:150]
-                    control = sugg.get("remediation", {}).get("control_to_implement", "Implement control")
-                    report += f"{i}. **{control}**\n   - Requirement: {req_stmt}...\n"
-                    
-                    steps = sugg.get("remediation", {}).get("implementation_steps", [])
-                    if steps:
-                        report += f"   - Steps: {', '.join(steps[:2])}\n"
-                    
-                    report += "\n"
-        
-        report += "\n---\n\n*End of Report*"
-        
-        return report
 
+            response = llm.invoke(prompt)
 
-# ------------------------------------------------------------------
-# MAIN PIPELINE
-# ------------------------------------------------------------------
-def analyze_rcm_compliance(
-    regulatory_file_paths: List[str],
-    regulatory_filenames: List[str],
-    rcm_file_path: str,
-    rcm_filename: str,
-    selected_model: str = "llama3"
-) -> Dict:
-    """
-    Main backend pipeline for RCM compliance analysis.
-    
-    Args:
-        regulatory_file_paths: List of file paths to regulatory documents
-        regulatory_filenames: List of filenames for regulatory documents
-        rcm_file_path: Path to RCM document
-        rcm_filename: Filename of RCM document
-        selected_model: LLM model to use
-    
-    Returns:
-        Dict containing compliance analysis results
-    """
-    
-    print(f"[INFO] Starting RCM compliance analysis with model: {selected_model}")
-    print(f"[INFO] Regulatory documents: {regulatory_filenames}")
-    print(f"[INFO] RCM document: {rcm_filename}")
-    
-    # 1. Load regulatory documents
-    regulatory_docs = []
-    for path, name in zip(regulatory_file_paths, regulatory_filenames):
-        docs = load_document(path, name)
-        regulatory_docs.extend(docs)
-        print(f"[INFO] Loaded {len(docs)} pages from {name}")
-    
-    if not regulatory_docs:
+            try:
+                import json
+                domain_analysis = json.loads(response)
+            except Exception:
+                domain_analysis = {
+                    "score": 50,
+                    "missing_requirements": [],
+                    "weak_controls": [],
+                    "recommendations": []
+                }
+
+            domain_scores[domain] = domain_analysis.get("score", 50)
+
+            # Assign per control status for compatibility
+            for ctrl in controls:
+                status = "COMPLIANT"
+
+                if ctrl.get("reference") in domain_analysis.get("weak_controls", []):
+                    status = "PARTIAL"
+
+                compliance_results.append({
+                    "control_reference": ctrl.get("reference"),
+                    "control_title": ctrl.get("title"),
+                    "control_description": ctrl.get("description", "")[:200],
+                    "domain": domain,
+                    "subdomain": ctrl.get("subdomain"),
+                    "sheet": ctrl.get("sheet"),
+                    "compliance_status": status,
+                    "gaps": ", ".join(domain_analysis.get("missing_requirements", []))[:300],
+                    "recommendation": ", ".join(domain_analysis.get("recommendations", []))[:300],
+                    "regulatory_matches": len(requirements)
+                })
+
+        # -----------------------------
+        # STEP 5 – Summary Metrics
+        # -----------------------------
+        total = len(compliance_results)
+        compliant = sum(1 for r in compliance_results if r["compliance_status"] == "COMPLIANT")
+        partial = sum(1 for r in compliance_results if r["compliance_status"] == "PARTIAL")
+        non_compliant = total - compliant - partial
+
+        overall_score = sum(domain_scores.values()) / len(domain_scores)
+
+        summary = {
+            "total_controls": len(all_controls),
+            "controls_analyzed": total,
+            "compliant": compliant,
+            "partial_compliant": partial,
+            "non_compliant": non_compliant,
+            "unable_to_assess": 0,
+            "errors": 0,
+            "overall_compliance_score": round(overall_score, 2),
+            "risk_level": "HIGH" if overall_score < 50 else "MEDIUM" if overall_score < 80 else "LOW"
+        }
+
+        # -----------------------------
+        # STEP 6 – Generate Comprehensive Report
+        # -----------------------------
+        final_report = generate_compliance_report(
+            rcm_controls=rcm_controls_by_sheet,
+            compliance_results=compliance_results,
+            summary=summary,
+            regulatory_docs=[Path(p).name for p in regulatory_docs]
+        )
+
         return {
-            "success": False, 
-            "error": "Failed to load any regulatory documents"
+            "success": True,
+            "rcm_structure": {s: len(c) for s, c in rcm_controls_by_sheet.items()},
+            "compliance_analysis": {
+                "overall_metrics": summary,
+                "risk_score": round(100 - overall_score, 2),
+                "detailed_results": compliance_results
+            },
+            "final_report": final_report,
+            "timestamp": datetime.now().isoformat()
         }
-    
-    # 2. Load RCM document
-    rcm_docs = load_document(rcm_file_path, rcm_filename)
-    
-    if not rcm_docs:
+
+    except Exception as e:
+        logger.error(f"Enhanced RCM compliance analysis failed: {e}")
         return {
-            "success": False, 
-            "error": f"Failed to load RCM document: {rcm_filename}"
+            "success": False,
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
         }
-    
-    print(f"[INFO] Loaded {len(rcm_docs)} pages from RCM")
-    
-    # 3. Split documents into chunks
-    splitter = get_text_splitter()
-    regulatory_chunks = splitter.split_documents(regulatory_docs)
-    rcm_chunks = splitter.split_documents(rcm_docs)
-    
-    print(f"[INFO] Regulatory chunks: {len(regulatory_chunks)}")
-    print(f"[INFO] RCM chunks: {len(rcm_chunks)}")
-    
-    # 4. Extract regulatory requirements
-    req_extractor = RegulatoryRequirementExtractor(selected_model)
-    regulatory_requirements = req_extractor.run(regulatory_chunks)
-    
-    if not regulatory_requirements:
-        print("[WARNING] No regulatory requirements extracted")
-    
-    # 5. Extract RCM controls
-    rcm_extractor = RCMControlExtractor(selected_model)
-    rcm_controls = rcm_extractor.run(rcm_chunks)
-    
-    if not rcm_controls:
-        print("[WARNING] No RCM controls extracted")
-    
-    # 6. Analyze compliance and identify gaps
-    compliance_analyzer = ComplianceAnalyzer(selected_model)
-    compliance_analysis = compliance_analyzer.analyze_compliance(
-        regulatory_requirements, 
-        rcm_controls
+
+def generate_compliance_report(
+    rcm_controls: Dict[str, List[Dict]],
+    compliance_results: List[Dict],
+    summary: Dict,
+    regulatory_docs: List[str]
+) -> str:
+
+    from collections import defaultdict
+    from datetime import datetime
+
+    report = []
+
+    report.append("=" * 110)
+    report.append("ENTERPRISE TECHNOLOGY RISK & CONTROL COMPLIANCE REPORT")
+    report.append("=" * 110)
+
+    report.append(f"\nGenerated On: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    report.append(f"Regulatory Frameworks Reviewed: {', '.join(regulatory_docs)}")
+
+    # ------------------------------------------------------------------
+    # EXECUTIVE SUMMARY
+    # ------------------------------------------------------------------
+    report.append("\n" + "=" * 110)
+    report.append("EXECUTIVE SUMMARY")
+    report.append("=" * 110)
+
+    report.append(f"\nTotal Controls in RCM           : {summary['total_controls']}")
+    report.append(f"Controls Analyzed              : {summary['controls_analyzed']}")
+    report.append(f"Overall Compliance Score       : {summary['overall_compliance_score']}%")
+    report.append(f"Overall Risk Rating            : {summary['risk_level']}")
+
+    report.append("\nCompliance Distribution:")
+    report.append(f"  ✔ Fully Compliant            : {summary['compliant']}")
+    report.append(f"  ⚠ Partially Compliant        : {summary['partial_compliant']}")
+    report.append(f"  ✖ Non-Compliant              : {summary['non_compliant']}")
+
+    # ------------------------------------------------------------------
+    # GROUP RESULTS BY DOMAIN
+    # ------------------------------------------------------------------
+    domain_map = defaultdict(list)
+    for result in compliance_results:
+        domain_map[result.get("domain", "General")].append(result)
+
+    # ------------------------------------------------------------------
+    # DOMAIN-WISE COMPREHENSIVE ANALYSIS
+    # ------------------------------------------------------------------
+    report.append("\n" + "=" * 110)
+    report.append("DOMAIN-WISE COMPREHENSIVE COMPLIANCE ASSESSMENT")
+    report.append("=" * 110)
+
+    for domain, controls in sorted(domain_map.items()):
+
+        report.append(f"\n\nDOMAIN: {domain.upper()}")
+        report.append("-" * 110)
+
+        total = len(controls)
+        compliant = sum(1 for c in controls if c["compliance_status"] == "COMPLIANT")
+        partial = sum(1 for c in controls if c["compliance_status"] == "PARTIAL")
+        non_compliant = sum(1 for c in controls if c["compliance_status"] == "NON-COMPLIANT")
+
+        domain_score = round(
+            ((compliant + 0.5 * partial) / total) * 100, 2
+        ) if total else 0
+
+        report.append(f"Domain Compliance Score : {domain_score}%")
+        report.append(f"Total Controls          : {total}")
+        report.append(f"Compliant               : {compliant}")
+        report.append(f"Partially Compliant     : {partial}")
+        report.append(f"Non-Compliant           : {non_compliant}")
+
+        report.append("\nCONTROL-BY-CONTROL ASSESSMENT:")
+        report.append("-" * 110)
+
+        for idx, ctrl in enumerate(controls, 1):
+
+            report.append(f"\n{idx}. CONTROL REFERENCE : {ctrl.get('control_reference', 'N/A')}")
+            report.append(f"   CONTROL TITLE       : {ctrl.get('control_title', 'N/A')}")
+            report.append(f"   DOMAIN / SUBDOMAIN  : {ctrl.get('domain', 'N/A')} / {ctrl.get('subdomain', 'N/A')}")
+            report.append(f"   SOURCE SHEET        : {ctrl.get('sheet', 'N/A')}")
+            report.append(f"   COMPLIANCE STATUS   : {ctrl.get('compliance_status', 'UNKNOWN')}")
+
+            if ctrl.get("compliance_status") == "COMPLIANT":
+                report.append("   ASSESSMENT          : Control adequately meets applicable regulatory requirements.")
+            else:
+                report.append(f"   NON-COMPLIANCE REASON:")
+                report.append(f"     - {ctrl.get('gaps', 'Insufficient control design or missing regulatory coverage.')}")
+
+                report.append("   REQUIRED IMPROVEMENTS:")
+                report.append(f"     - {ctrl.get('recommendation', 'Define and implement control enhancements aligned to regulation.')}")
+
+            report.append(f"   REGULATORY MATCHES  : {ctrl.get('regulatory_matches', 0)}")
+
+        # ------------------------------------------------------------------
+        # DOMAIN THEMATIC OBSERVATIONS
+        # ------------------------------------------------------------------
+        report.append("\nDOMAIN-LEVEL OBSERVATIONS:")
+        report.append("-" * 110)
+
+        domain_gaps = [
+            c for c in controls if c["compliance_status"] != "COMPLIANT"
+        ]
+
+        if not domain_gaps:
+            report.append("✔ No significant gaps identified. Domain controls are operating effectively.")
+        else:
+            for gap in domain_gaps:
+                report.append(
+                    f"- Control {gap['control_reference']} requires enhancement to meet regulatory intent."
+                )
+
+        # ------------------------------------------------------------------
+        # DOMAIN REMEDIATION ROADMAP
+        # ------------------------------------------------------------------
+        report.append("\nDOMAIN REMEDIATION RECOMMENDATIONS:")
+        report.append("-" * 110)
+
+        unique_recommendations = list({
+            c["recommendation"]
+            for c in controls
+            if c.get("recommendation")
+        })
+
+        for rec in unique_recommendations:
+            report.append(f"- {rec}")
+
+    # ------------------------------------------------------------------
+    # FINAL CONCLUSION
+    # ------------------------------------------------------------------
+    report.append("\n" + "=" * 110)
+    report.append("OVERALL CONCLUSION")
+    report.append("=" * 110)
+
+    report.append(
+        "This assessment evaluated the organization’s Risk Control Matrix against "
+        "applicable technology risk regulations. While certain domains demonstrate "
+        "adequate control maturity, multiple areas require enhancement to fully align "
+        "with regulatory expectations. Addressing identified gaps will significantly "
+        "reduce operational, compliance, and regulatory risk."
     )
-    
-    # 7. Generate remediation suggestions for gaps
-    remediation_suggester = RemediationSuggester(selected_model)
-    remediation_suggestions = remediation_suggester.generate_suggestions(
-        compliance_analysis["gaps"],
-        compliance_analysis["domain_analyses"]
-    )
-    
-    # 8. Generate comprehensive compliance report
-    report_generator = ComplianceReportGenerator(selected_model)
-    final_report = report_generator.generate_full_report(
-        regulatory_filenames,
-        rcm_filename,
-        compliance_analysis,
-        remediation_suggestions
-    )
-    
-    # 9. Return complete analysis results
-    return {
-        "success": True,
-        "analysis_timestamp": datetime.now().isoformat(),
-        "model_used": selected_model,
-        "regulatory_documents": regulatory_filenames,
-        "rcm_document": rcm_filename,
-        "regulatory_requirements_count": len(regulatory_requirements),
-        "rcm_controls_count": len(rcm_controls),
-        "compliance_analysis": compliance_analysis,
-        "remediation_suggestions": remediation_suggestions,
-        "final_report": final_report,
-        "metadata": {
-            "regulatory_chunks": len(regulatory_chunks),
-            "rcm_chunks": len(rcm_chunks),
-            "regulatory_pages": len(regulatory_docs),
-            "rcm_pages": len(rcm_docs)
-        }
-    }
+
+    report.append("\n" + "=" * 110)
+    report.append("END OF REPORT")
+    report.append("=" * 110)
+
+    return "\n".join(report)
 
 
-# ------------------------------------------------------------------
-# UTILITY FUNCTIONS FOR EXTERNAL USE
-# ------------------------------------------------------------------
-def save_compliance_artifacts(result: Dict, output_dir: str = "./compliance_output"):
+def save_compliance_artifacts(
+    results: Dict[str, Any],
+    output_dir: str
+) -> Dict[str, str]:
     """
     Save compliance analysis artifacts to disk.
     
     Args:
-        result: Analysis result from analyze_rcm_compliance()
+        results: Analysis results
         output_dir: Directory to save artifacts
+    
+    Returns:
+        Dict with paths to saved files
     """
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Save full JSON analysis
-    with open(f"{output_dir}/full_analysis.json", "w") as f:
-        json.dump(result, f, indent=2, default=str)
-    
-    # Save compliance report
-    with open(f"{output_dir}/compliance_report.md", "w") as f:
-        f.write(result.get("final_report", "No report generated"))
-    
-    # Save remediation action plan
-    with open(f"{output_dir}/remediation_plan.json", "w") as f:
-        json.dump(result.get("remediation_suggestions", {}), f, indent=2, default=str)
-    
-    # Save gap analysis
-    with open(f"{output_dir}/gap_analysis.json", "w") as f:
-        json.dump({
-            "overall_metrics": result["compliance_analysis"]["overall_metrics"],
-            "gaps_by_domain": {
-                domain: analysis["gaps"]
-                for domain, analysis in result["compliance_analysis"]["domain_analyses"].items()
-            }
-        }, f, indent=2, default=str)
-    
-    # Save compliance summary
-    with open(f"{output_dir}/compliance_summary.json", "w") as f:
-        json.dump({
-            "compliance_percentage": result["compliance_analysis"]["overall_metrics"]["compliance_percentage"],
-            "compliant_requirements": result["compliance_analysis"]["overall_metrics"]["compliant_requirements"],
-            "gap_requirements": result["compliance_analysis"]["overall_metrics"]["gap_requirements"],
-            "risk_score": result["compliance_analysis"]["overall_metrics"]["risk_score"],
-            "domains": {
-                domain: {
-                    "compliance_percentage": analysis.get("compliance_percentage", 0),
-                    "status": analysis.get("compliance_status", "Unknown"),
-                    "gap_count": len(analysis.get("gaps", []))
-                }
-                for domain, analysis in result["compliance_analysis"]["domain_analyses"].items()
-            }
-        }, f, indent=2, default=str)
-    
-    print(f"[INFO] Compliance artifacts saved to {output_dir}")
-    
-    return output_dir
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        
+        artifacts = {}
+        
+        # Save report
+        report_path = os.path.join(output_dir, "rcm_compliance_report.txt")
+        with open(report_path, 'w', encoding='utf-8') as f:
+            f.write(results.get('final_report', ''))
+        artifacts['report'] = report_path
+        logger.info(f"Saved report to: {report_path}")
+        
+        # Save JSON results
+        import json
+        json_path = os.path.join(output_dir, "rcm_compliance_results.json")
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(results, f, indent=2, ensure_ascii=False)
+        artifacts['json'] = json_path
+        logger.info(f"Saved JSON to: {json_path}")
+        
+        # Save CSV of detailed results
+        csv_path = os.path.join(output_dir, "rcm_compliance_details.csv")
+        if results.get('success') and results.get('compliance_analysis'):
+            detailed = results['compliance_analysis'].get('detailed_results', [])
+            if detailed:
+                import csv
+                with open(csv_path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.DictWriter(f, fieldnames=detailed[0].keys())
+                    writer.writeheader()
+                    writer.writerows(detailed)
+                artifacts['csv'] = csv_path
+                logger.info(f"Saved CSV to: {csv_path}")
+        
+        logger.info(f"Saved all compliance artifacts to: {output_dir}")
+        
+        return artifacts
+        
+    except Exception as e:
+        logger.error(f"Failed to save artifacts: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {}
